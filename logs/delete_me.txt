@@ -1,0 +1,1 @@
+delete this file when necessary log files are in the folder
