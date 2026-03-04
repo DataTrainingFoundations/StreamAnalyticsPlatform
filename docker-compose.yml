@@ -201,3 +201,6 @@ volumes:
   airflow_logs:
   spark_data:
   minio_data:
+
+env_file:
+  - .env
