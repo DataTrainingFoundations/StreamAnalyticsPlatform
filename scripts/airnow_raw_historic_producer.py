@@ -4,7 +4,6 @@ Producer for Raw Historical Data Kafka Topic
 
 import os
 import json
-import time
 from datetime import datetime
 import requests
 from kafka import KafkaProducer
