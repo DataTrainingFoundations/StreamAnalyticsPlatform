@@ -22,7 +22,7 @@ def fetch_current_month(start=yesterday, end=now):
     Fetches historical data (from yesterday to now by default)
     """
     api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_REALTIME_DATA_URL", "")
+    airnow_url = os.getenv("AIRNOW_HISTORIC_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
