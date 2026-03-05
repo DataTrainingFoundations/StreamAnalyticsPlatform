@@ -8,6 +8,7 @@ pyspark = "*"
 kafka-python = "*"
 apache-airflow = "*"
 uvloop = {version="*", markers="sys_platform != 'win32'"}
+boto3 = "*"
 
 [dev-packages]
 

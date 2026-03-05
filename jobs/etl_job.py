@@ -20,6 +20,7 @@ def run_etl(spark: SparkSession, input_path: str, output_path: str):
         output_path: Gold zone path (e.g., '/opt/spark-data/gold')
     """
     # TODO: Implement
+    
     pass
 
 
