@@ -4,11 +4,12 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-pyspark = "*"
+pyspark = "==3.5.0"
 kafka-python = "*"
-apache-airflow = "*"
 uvloop = {version="*", markers="sys_platform != 'win32'"}
 boto3 = "*"
+apache-airflow = "==2.8.1"
+flask = "*"
 
 [dev-packages]
 

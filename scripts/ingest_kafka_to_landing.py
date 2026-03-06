@@ -39,8 +39,8 @@ def consume_historical_data_batch():
     )
 
     # Create MinIO client and create bucket, if nonexistent
-    minio_access_key = os.getenv("MINIO_ACCESS_KEY")
-    minio_secret_key = os.getenv("MINIO_SECRET_KEY")
+    minio_access_key = os.getenv("MINIO_ROOT_USER")
+    minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
     endpoint = (
         constants.DOCKER_MINIO_ENDPOINT
         if docker_env == "1"

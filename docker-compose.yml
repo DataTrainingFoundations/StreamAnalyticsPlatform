@@ -77,12 +77,11 @@ services:
   minio:
     image: minio/minio:latest
     container_name: minio
+    env_file:
+      - .env
     ports:
       - "9000:9000"      # API
       - "9001:9001"      # Web UI
-    environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: admin123
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -144,6 +143,24 @@ services:
       - streamflow-network
 
   # =============================================================================
+  # POSTGRES (for concurrency with Airflow)
+  # =============================================================================
+  postgres:
+    image: postgres:15
+    container_name: airflow-postgres
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - streamflow-network
+
+  # =============================================================================
   # AIRFLOW (Custom Image with Spark Client)
   # =============================================================================
   airflow:
@@ -159,14 +176,10 @@ services:
       - "8082:8080"
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
-      - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here-replace-in-production
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - AIRFLOW__WEBSERVER__SECRET_KEY=streamflow-secret-key
       - _AIRFLOW_DB_MIGRATE=true
       - _AIRFLOW_WWW_USER_CREATE=true
-      - _AIRFLOW_WWW_USER_USERNAME=admin
-      - _AIRFLOW_WWW_USER_PASSWORD=admin
     volumes:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
@@ -181,6 +194,8 @@ services:
       timeout: 10s
       retries: 5
     depends_on:
+      postgres:
+        condition: service_healthy
       kafka:
         condition: service_healthy
       spark-master:
@@ -203,3 +218,4 @@ volumes:
   airflow_logs:
   spark_data:
   minio_data:
+  postgres_data:
