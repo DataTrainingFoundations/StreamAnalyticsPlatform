@@ -154,8 +154,6 @@ services:
     env_file:
       - .env
     # Run as root to match Spark container permissions for shared volume access
-    env_file:
-      - .env
     user: root
     ports:
       - "8082:8080"
