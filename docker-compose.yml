@@ -151,6 +151,8 @@ services:
       context: .
       dockerfile: Dockerfile.airflow
     container_name: streamflow-airflow
+    env_file:
+      - .env
     # Run as root to match Spark container permissions for shared volume access
     user: root
     ports:
@@ -201,6 +203,3 @@ volumes:
   airflow_logs:
   spark_data:
   minio_data:
-
-env_file:
-  - .env
