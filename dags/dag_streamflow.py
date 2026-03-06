@@ -4,8 +4,8 @@ StreamFlow Analytics Platform - Main Orchestration DAG
 Orchestrates: Kafka Ingest -> Spark ETL -> Validation
 """
 from airflow import DAG
-from airflow.providers.standard.operators.bash import BashOperator
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator # type: ignore
+from airflow.operators.python import PythonOperator # type: ignore
 from datetime import datetime, timedelta
 
 
@@ -18,7 +18,7 @@ with DAG(
     dag_id='streamflow_main',
     default_args=default_args,
     start_date=datetime(2024, 1, 1),
-    schedule=None,
+    schedule_interval=None,
     catchup=False,
 ) as dag:
     

@@ -8,6 +8,8 @@ pyspark = "==3.5.0"
 kafka-python = "*"
 uvloop = {version="*", markers="sys_platform != 'win32'"}
 boto3 = "*"
+apache-airflow = "==2.8.1"
+flask = "*"
 
 [dev-packages]
 
