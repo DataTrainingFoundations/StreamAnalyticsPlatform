@@ -87,12 +87,15 @@ def main():
     """
     oldest_date_time = None
     start, end = get_times(oldest_date_time)
-
     
-    records = fetch_current_month(start, end)
-    print("\n\nRecords Retrieved:\n\n")
-    print(records, "\n\n\n")
-    publish_raw_historical_records(records)
+    for bbox in BBOXES:
+        try:
+            records = fetch_current_month(start, end, bbox)
+            print("\n\nRecords Retrieved:\n\n")
+            # print(records, "\n\n\n")
+            publish_raw_historical_records(records)
+        except:
+            print(f"failed at {bbox} for time period {start} - {end}")
 
 
 if __name__ == "__main__":
