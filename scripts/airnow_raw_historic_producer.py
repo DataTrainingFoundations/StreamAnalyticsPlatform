@@ -13,7 +13,7 @@ from util import constants
 
 load_dotenv()
 
-def get_times(oldest_date_time):
+def get_times(oldest_date_time = None):
     """
     datetime(2026, 2, 28) is currently the default
     oldest_date_time is currently None as we haven't passing anything in right now
@@ -28,7 +28,7 @@ def get_times(oldest_date_time):
     return start, end
 
 
-def fetch_current_month(start, end):
+def fetch_month_data(start, end):
     """
     Fetches historical data (from yesterday to now by default)
     """
@@ -85,9 +85,10 @@ def main():
     """
     Main function for running producer locally
     """
+    # TODO: Add functionality to retrieve oldest date in DB and pull historical data from there
     oldest_date_time = None
     start, end = get_times(oldest_date_time)
-    records = fetch_current_month(start, end)
+    records = fetch_month_data(start, end)
     print("\n\nRecords Retrieved:\n\n")
     print(records, "\n\n\n")
     publish_raw_historical_records(records)

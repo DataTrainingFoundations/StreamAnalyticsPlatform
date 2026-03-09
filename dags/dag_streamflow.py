@@ -11,7 +11,8 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from scripts.airnow_raw_historic_producer import (
-    fetch_current_month,
+    get_times,
+    fetch_month_data,
     publish_raw_historical_records,
 )
 from scripts.ingest_kafka_to_landing import consume_historical_data
@@ -28,7 +29,8 @@ default_args = {
 def produce_historial_data():
     """Execute the AirNow data producer"""
     try:
-        records = fetch_current_month()
+        start, end = get_times()
+        records = fetch_month_data(start, end)
         publish_raw_historical_records(records)
         print(f"✓ Published {len(records)} records to Kafka")
     except Exception as e:
