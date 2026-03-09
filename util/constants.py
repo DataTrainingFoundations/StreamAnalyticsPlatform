@@ -13,12 +13,6 @@ DOCKER_MINIO_ENDPOINT = "http://minio:9000"
 LOCAL_MINIO_ENDPOINT = "http://localhost:9000"
 MINIO_HISTORICAL_DATA_BUCKET = "kafka-raw-historical-data"
 
-import os
-
-SPARK_APP_NAME = os.getenv("SPARK_APP_NAME", "AirNowStreamAnalytics")
-SPARK_MASTER   = os.getenv("SPARK_MASTER", "local[*]")
-
-
 BBOXES = [
 "-161.8126,49.98,-149.79739,61.22586",
 "-161.063,61.18586,-147.70727,66.8549",

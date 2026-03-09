@@ -2,18 +2,20 @@
 SparkSession Factory Module
 jobs/spark_session_factory.py
 """
-from pyspark.sql import SparkSession
+
 from typing import Optional
 import os
 import sys
+from pyspark.sql import SparkSession
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from util.constants import SPARK_APP_NAME, SPARK_MASTER
 
+spark_app_name = os.getenv("SPARK_APP_NAME", "AirNowStreamAnalytics")
+spark_master = os.getenv("SPARK_MASTER", "local[*]")
 
 def create_spark_session(
-    app_name: str = SPARK_APP_NAME,
-    master: str = SPARK_MASTER,
+    app_name: str = spark_app_name,
+    master: str = spark_master,
     config_overrides: Optional[dict] = None
 ) -> SparkSession:
     """
@@ -25,7 +27,7 @@ def create_spark_session(
     """
     builder = (
         SparkSession.builder
-        .appName(app_name)
+        .appName(app_name) # type: ignore
         .master(master)
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
@@ -43,7 +45,7 @@ def create_spark_session(
     return spark
 
 
-def get_or_create_session(app_name: str = SPARK_APP_NAME) -> SparkSession:
+def get_or_create_session(app_name: str = spark_app_name) -> SparkSession:
     """
     Return the active SparkSession or create a default one.
     Safe to call from etl_job.py without risking duplicate sessions.
