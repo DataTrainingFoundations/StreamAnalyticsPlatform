@@ -4,7 +4,8 @@ Producer for Raw Historical Data Kafka Topic
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import requests
 from kafka import KafkaProducer
 from dotenv import load_dotenv
@@ -12,11 +13,22 @@ from util import constants
 
 load_dotenv()
 
-yesterday = datetime.now().replace(day=datetime.now().day - 1).strftime("%Y-%m-%dT%H")
-now = datetime.now().strftime("%Y-%m-%dT%H")
+def get_times(oldest_date_time):
+    """
+    datetime(2026, 2, 28) is currently the default
+    oldest_date_time is currently None as we haven't passing anything in right now
+    the interval is by month so start is start of the month and end is end of the month
+    """
+    if oldest_date_time is None:
+        start = (datetime(2026, 2, 28, 0) - relativedelta(months=1)).strftime("%Y-%m-%dT%H")
+        end = (datetime(2026, 2, 28, 23) - timedelta(days=1)).strftime("%Y-%m-%dT%H")
+    else:
+        start = (oldest_date_time.replace(hour=0) - relativedelta(months=1)).strftime("%Y-%m-%dT%H")
+        end = (oldest_date_time.replace(hour=23) - timedelta(days=1)).strftime("%Y-%m-%dT%H")
+    return start, end
 
 
-def fetch_current_month(start=yesterday, end=now):
+def fetch_current_month(start, end):
     """
     Fetches historical data (from yesterday to now by default)
     """
@@ -73,7 +85,9 @@ def main():
     """
     Main function for running producer locally
     """
-    records = fetch_current_month()
+    oldest_date_time = None
+    start, end = get_times(oldest_date_time)
+    records = fetch_current_month(start, end)
     print("\n\nRecords Retrieved:\n\n")
     print(records, "\n\n\n")
     publish_raw_historical_records(records)
