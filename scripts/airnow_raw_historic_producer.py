@@ -28,7 +28,7 @@ def get_times(oldest_date_time):
     return start, end
 
 
-def fetch_current_month(start, end):
+def fetch_current_month(start, end, bbox):
     """
     Fetches historical data (from yesterday to now by default)
     """
@@ -44,7 +44,7 @@ def fetch_current_month(start, end):
         "startDate": start,
         "endDate": end,
         "parameters": "PM25,PM10,OZONE,NO2,CO,SO2",
-        "BBOX": "-85.13,33.30,-84.20,34.00",  # LongLats for Atlanta, GA Metro Area
+        "BBOX": bbox,  # LongLats for Atlanta, GA Metro Area
         "dataType": "A",
         "format": "application/json",
         "verbose": 1,
@@ -87,6 +87,8 @@ def main():
     """
     oldest_date_time = None
     start, end = get_times(oldest_date_time)
+
+    
     records = fetch_current_month(start, end)
     print("\n\nRecords Retrieved:\n\n")
     print(records, "\n\n\n")
