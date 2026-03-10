@@ -89,9 +89,9 @@ def main():
     oldest_date_time = None
     start, end = get_times(oldest_date_time)
 
-    for bbox in BBOXES:
+    for bbox in constants.BBOXES:
         try:
-            records = fetch_current_month(start, end, bbox)
+            records = fetch_month_data(start, end, bbox)
             print("\n\nRecords Retrieved:\n\n")
             # print(records, "\n\n\n")
             publish_raw_historical_records(records)
