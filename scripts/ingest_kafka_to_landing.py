@@ -18,7 +18,7 @@ from util import constants
 load_dotenv()
 
 
-def consume_historical_data_batch():
+def consume_historical_data():
     """
     Consume historical data from Kafka and write to landing zone (MinIO).
     """
@@ -39,8 +39,6 @@ def consume_historical_data_batch():
     )
 
     # Create MinIO client and create bucket, if nonexistent
-    minio_access_key = os.getenv("MINIO_ROOT_USER")
-    minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
     endpoint = (
         constants.DOCKER_MINIO_ENDPOINT
         if docker_env == "1"
@@ -49,44 +47,67 @@ def consume_historical_data_batch():
     s3_client = boto3.client(
         "s3",
         endpoint_url=endpoint,
-        aws_access_key_id=minio_access_key,
-        aws_secret_access_key=minio_secret_key,
+        aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+        aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
     )
 
     existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
     if constants.MINIO_HISTORICAL_DATA_BUCKET not in existing_buckets:
         s3_client.create_bucket(Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET)
-        print(f"Created buckedt: {constants.MINIO_HISTORICAL_DATA_BUCKET}")
+        print(f"Created bucket: {constants.MINIO_HISTORICAL_DATA_BUCKET}")
 
     # Consume and batch messages and insert into bucket
     batch = []
-    last_batch_time = time.time()
+    last_message_time = time.time()
 
-    for message in consumer:
-        # Convert message bytes to string
-        batch.append(message.value.decode())
+    print("Starting Kafka batch consumption...")
 
-        # Check if batch should be written
-        if (
-            len(batch) >= constants.KAFKA_BATCH_SIZE
-            or (time.time() - last_batch_time) >= constants.KAFKA_BATCH_INTERVAL
-        ):
-            if batch:
-                # Generate unique filename for batch
-                key = f"{uuid.uuid4()}.json"
+    while True:
 
-                # Write batch as JSON array to MinIO
-                s3_client.put_object(
-                    Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET,
-                    Key=key,
-                    Body=json.dumps(batch).encode(),
-                )
-                print(f"Wrote batch of {len(batch)} messages to MinIO as {key}")
+        records = consumer.poll(timeout_ms=1000)
 
-                # Clear batch and reset timer
-                batch = []
-                last_batch_time = time.time()
+        if not records:
+            # Exit if no messages arrive for a while
+            if time.time() - last_message_time > constants.MAX_KAFKA_CONSUMER_IDLE_TIME:
+                print("No new messages detected. Exiting consumer.")
+                break
+            continue
 
+        for _, messages in records.items():
+            for message in messages:
+                batch.append(message.value.decode())
+
+        last_message_time = time.time()
+
+        if len(batch) >= constants.KAFKA_BATCH_SIZE:
+
+            key = f"{uuid.uuid4()}.json"
+
+            s3_client.put_object(
+                Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET,
+                Key=key,
+                Body=json.dumps(batch).encode(),
+            )
+
+            print(f"Wrote {len(batch)} messages to MinIO as {key}")
+
+            batch = []
+
+    # Write remaining messages
+    if batch:
+        key = f"{uuid.uuid4()}.json"
+
+        s3_client.put_object(
+            Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET,
+            Key=key,
+            Body=json.dumps(batch).encode(),
+        )
+
+        print(f"Wrote final {len(batch)} messages to MinIO")
+
+    consumer.close()
+
+    print("Kafka batch ingestion complete.")
 
 if __name__ == "__main__":
-    consume_historical_data_batch()
+    consume_historical_data()
