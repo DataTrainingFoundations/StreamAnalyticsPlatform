@@ -26,7 +26,7 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-def produce_historial_data():
+def produce_historical_data():
     """Execute the AirNow data producer"""
     try:
         start, end = get_times()
@@ -50,7 +50,7 @@ with DAG(
     # Task 1: Produce raw data from AirNow API to Kafka
     produce_data = PythonOperator(
         task_id="produce_raw_data",
-        python_callable=produce_historial_data,
+        python_callable=produce_historical_data,
         doc="Fetch historical air quality data from AirNow API and publish to Kafka",
     )
 
