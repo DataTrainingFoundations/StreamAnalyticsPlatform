@@ -28,7 +28,7 @@ def get_times(oldest_date_time = None):
     return start, end
 
 
-def fetch_month_data(start, end):
+def fetch_month_data(start, end, bbox):
     """
     Fetches historical data (from yesterday to now by default)
     """
@@ -44,7 +44,7 @@ def fetch_month_data(start, end):
         "startDate": start,
         "endDate": end,
         "parameters": "PM25,PM10,OZONE,NO2,CO,SO2",
-        "BBOX": "-85.13,33.30,-84.20,34.00",  # LongLats for Atlanta, GA Metro Area
+        "BBOX": bbox,  
         "dataType": "A",
         "format": "application/json",
         "verbose": 1,
@@ -88,10 +88,15 @@ def main():
     # TODO: Add functionality to retrieve oldest date in DB and pull historical data from there
     oldest_date_time = None
     start, end = get_times(oldest_date_time)
-    records = fetch_month_data(start, end)
-    print("\n\nRecords Retrieved:\n\n")
-    print(records, "\n\n\n")
-    publish_raw_historical_records(records)
+
+    for bbox in BBOXES:
+        try:
+            records = fetch_current_month(start, end, bbox)
+            print("\n\nRecords Retrieved:\n\n")
+            # print(records, "\n\n\n")
+            publish_raw_historical_records(records)
+        except:
+            print(f"failed at {bbox} for time period {start} - {end}")
 
 
 if __name__ == "__main__":
