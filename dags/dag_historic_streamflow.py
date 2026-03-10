@@ -30,7 +30,7 @@ default_args = {
 def produce_historical_data():
     """Execute the AirNow data producer"""
     start, end = get_times()
-    for bbox in BBOXES:
+    for bbox in constants.BBOXES:
         try:
             records = fetch_month_data(start, end, bbox)
             publish_raw_historical_records(records)

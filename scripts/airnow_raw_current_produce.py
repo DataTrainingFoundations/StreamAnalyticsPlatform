@@ -13,22 +13,7 @@ from util import constants
 
 load_dotenv()
 
-def get_times(oldest_date_time = None):
-    """
-    datetime(2026, 2, 28) is currently the default
-    oldest_date_time is currently None as we haven't passing anything in right now
-    the interval is by month so start is start of the month and end is end of the month
-    """
-    if oldest_date_time is None:
-        start = (datetime(2026, 2, 28, 0) - relativedelta(months=1)).strftime("%Y-%m-%dT%H")
-        end = (datetime(2026, 2, 28, 23) - timedelta(days=1)).strftime("%Y-%m-%dT%H")
-    else:
-        start = (oldest_date_time.replace(hour=0) - relativedelta(months=1)).strftime("%Y-%m-%dT%H")
-        end = (oldest_date_time.replace(hour=23) - timedelta(days=1)).strftime("%Y-%m-%dT%H")
-    return start, end
-
-
-def fetch_month_data(start, end, bbox):
+def fetch_month_data(bbox):
     """
     Fetches historical data (from yesterday to now by default)
     """
@@ -41,8 +26,8 @@ def fetch_month_data(start, end, bbox):
         raise ValueError("Missing airnow url")
 
     params = {
-        "startDate": start,
-        "endDate": end,
+        "startDate": None,
+        "endDate": None,
         "parameters": "PM25,PM10,OZONE,NO2,CO,SO2",
         "BBOX": bbox,  
         "dataType": "A",
@@ -85,18 +70,15 @@ def main():
     """
     Main function for running producer locally
     """
-    # TODO: Add functionality to retrieve oldest date in DB and pull historical data from there
-    oldest_date_time = None
-    start, end = get_times(oldest_date_time)
-
     for bbox in constants.BBOXES:
         try:
-            records = fetch_current_month(start, end, bbox)
+            records = fetch_current_month(bbox)
             print("\n\nRecords Retrieved:\n\n")
-            # print(records, "\n\n\n")
-            publish_raw_historical_records(records)
+            print(records, "\n\n\n")
+            #publish_raw_historical_records(records)
+            break
         except:
-            print(f"failed at {bbox} for time period {start} - {end}")
+            print(f"failed at {bbox}")
 
 
 if __name__ == "__main__":
