@@ -71,10 +71,12 @@ def main():
         try:
             records = fetch_current_data(bbox)
             print("\n\nRecords Retrieved:\n\n")
+            print(records, "\n\n")
             publish_raw_current_records(records)
             break
         except:
             print(f"failed at {bbox}")
+            break
 
 
 if __name__ == "__main__":
