@@ -54,7 +54,7 @@ def consume_historical_data():
     existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
     if constants.MINIO_HISTORICAL_DATA_BUCKET not in existing_buckets:
         s3_client.create_bucket(Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET)
-        print(f"Created buckedt: {constants.MINIO_HISTORICAL_DATA_BUCKET}")
+        print(f"Created bucket: {constants.MINIO_HISTORICAL_DATA_BUCKET}")
 
     # Consume and batch messages and insert into bucket
     batch = []
