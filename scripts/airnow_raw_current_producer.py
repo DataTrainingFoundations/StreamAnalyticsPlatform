@@ -1,11 +1,10 @@
 """
-Producer for Raw Historical Data Kafka Topic
+Producer for Raw Current Data Kafka Topic
 """
 
 import os
 import json
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from datetime import datetime
 import requests
 from kafka import KafkaProducer
 from dotenv import load_dotenv
@@ -13,12 +12,12 @@ from util import constants
 
 load_dotenv()
 
-def fetch_month_data(bbox):
+def fetch_current_data(bbox):
     """
     Fetches historical data (from yesterday to now by default)
     """
     api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_HISTORIC_DATA_URL", "")
+    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
@@ -26,8 +25,6 @@ def fetch_month_data(bbox):
         raise ValueError("Missing airnow url")
 
     params = {
-        "startDate": None,
-        "endDate": None,
         "parameters": "PM25,PM10,OZONE,NO2,CO,SO2",
         "BBOX": bbox,  
         "dataType": "A",
@@ -38,7 +35,7 @@ def fetch_month_data(bbox):
     return requests.get(airnow_url, params=params, timeout=300_000).json()
 
 
-def publish_raw_historical_records(records):
+def publish_raw_current_records(records):
     """
     Publishes raw historical records to corresponding kafka topic
     """
@@ -54,10 +51,10 @@ def publish_raw_historical_records(records):
     )
 
     for record in records:
-        record["source"] = "airnow_historical"
+        record["source"] = "airnow_current"
         record["ingested_at"] = datetime.now().isoformat()
         producer.send(
-            constants.RAW_HISTORICAL_DATA_KAFKA_TOPIC,
+            constants.RAW_CURRENT_DATA_KAFKA_TOPIC,
             key=record["FullAQSCode"].encode(),
             value=record,
         )
@@ -72,10 +69,9 @@ def main():
     """
     for bbox in constants.BBOXES:
         try:
-            records = fetch_current_month(bbox)
+            records = fetch_current_data(bbox)
             print("\n\nRecords Retrieved:\n\n")
-            print(records, "\n\n\n")
-            #publish_raw_historical_records(records)
+            publish_raw_current_records(records)
             break
         except:
             print(f"failed at {bbox}")

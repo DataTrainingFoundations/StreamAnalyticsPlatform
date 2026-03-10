@@ -33,7 +33,7 @@ def fetch_month_data(start, end, bbox):
     Fetches historical data (from yesterday to now by default)
     """
     api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_HISTORIC_DATA_URL", "")
+    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
@@ -93,7 +93,6 @@ def main():
         try:
             records = fetch_month_data(start, end, bbox)
             print("\n\nRecords Retrieved:\n\n")
-            # print(records, "\n\n\n")
             publish_raw_historical_records(records)
         except:
             print(f"failed at {bbox} for time period {start} - {end}")

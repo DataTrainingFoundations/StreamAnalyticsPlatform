@@ -3,6 +3,7 @@ Constants for project
 """
 
 RAW_HISTORICAL_DATA_KAFKA_TOPIC = "airnow_raw_historical"
+RAW_CURRENT_DATA_KAFKA_TOPIC = "airnow_raw_current"
 DOCKER_KAFKA_BOOTSTRAP_SERVER = ["kafka:9092"]
 LOCAL_KAFKA_BOOTSTRAP_SERVER = ["localhost:9094"]
 KAFKA_BATCH_SIZE = 100        # Messages per batch
@@ -12,6 +13,7 @@ MAX_KAFKA_CONSUMER_IDLE_TIME = 10  # seconds before exiting kafka consumer task
 DOCKER_MINIO_ENDPOINT = "http://minio:9000"
 LOCAL_MINIO_ENDPOINT = "http://localhost:9000"
 MINIO_HISTORICAL_DATA_BUCKET = "kafka-raw-historical-data"
+MINIO_HISTORICAL_DATA_BUCKET = "kafka-raw-current-data"
 
 BBOXES = [
 "-161.8126,49.98,-149.79739,61.22586",
