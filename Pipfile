@@ -10,6 +10,7 @@ uvloop = {version="*", markers="sys_platform != 'win32'"}
 boto3 = "*"
 apache-airflow = "==2.8.1"
 flask = "*"
+streamlit = "*"
 
 [dev-packages]
 
