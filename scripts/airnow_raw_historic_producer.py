@@ -13,7 +13,7 @@ from util import constants
 
 load_dotenv()
 
-def get_times(oldest_date_time):
+def get_times(oldest_date_time = None):
     """
     datetime(2026, 2, 28) is currently the default
     oldest_date_time is currently None as we haven't passing anything in right now
@@ -28,7 +28,7 @@ def get_times(oldest_date_time):
     return start, end
 
 
-def fetch_current_month(start, end, bbox):
+def fetch_month_data(start, end):
     """
     Fetches historical data (from yesterday to now by default)
     """
@@ -44,7 +44,7 @@ def fetch_current_month(start, end, bbox):
         "startDate": start,
         "endDate": end,
         "parameters": "PM25,PM10,OZONE,NO2,CO,SO2",
-        "BBOX": bbox,  # LongLats for Atlanta, GA Metro Area
+        "BBOX": "-85.13,33.30,-84.20,34.00",  # LongLats for Atlanta, GA Metro Area
         "dataType": "A",
         "format": "application/json",
         "verbose": 1,
@@ -85,17 +85,13 @@ def main():
     """
     Main function for running producer locally
     """
+    # TODO: Add functionality to retrieve oldest date in DB and pull historical data from there
     oldest_date_time = None
     start, end = get_times(oldest_date_time)
-    
-    for bbox in BBOXES:
-        try:
-            records = fetch_current_month(start, end, bbox)
-            print("\n\nRecords Retrieved:\n\n")
-            # print(records, "\n\n\n")
-            publish_raw_historical_records(records)
-        except:
-            print(f"failed at {bbox} for time period {start} - {end}")
+    records = fetch_month_data(start, end)
+    print("\n\nRecords Retrieved:\n\n")
+    print(records, "\n\n\n")
+    publish_raw_historical_records(records)
 
 
 if __name__ == "__main__":
