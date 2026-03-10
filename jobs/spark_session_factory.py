@@ -7,7 +7,10 @@ from typing import Optional
 import os
 import sys
 from pyspark.sql import SparkSession
+from dotenv import load_dotenv
+from util import *
 
+load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 spark_app_name = os.getenv("SPARK_APP_NAME", "AirNowStreamAnalytics")
@@ -25,10 +28,18 @@ def create_spark_session(
         master: Spark master URL (e.g., "local[*]")
         config_overrides: Optional dictionary of additional Spark configs
     """
+    docker_env = os.getenv("DOCKER_ENV")
     builder = (
         SparkSession.builder
         .appName(app_name) # type: ignore
         .master(master)
+        .config("spark.hadoop.fs.s3a.endpoint", constants.DOCKER_MINIO_ENDPOINT
+                if docker_env == "1"
+                else constants.LOCAL_MINIO_ENDPOINT)
+        .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ROOT_USER"))
+        .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_ROOT_PASSWORD"))
+        .config("spark.hadoop.fs.s3a.path.style.access", "true")
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
         .config("spark.sql.shuffle.partitions", "8")

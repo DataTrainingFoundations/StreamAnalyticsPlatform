@@ -5,14 +5,19 @@ Reads JSON from landing zone, applies transformations, writes CSV to gold zone.
 
 Pattern: ./data/landing/*.json -> (This Job) -> ./data/gold/
 """
+from dotenv import load_dotenv
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
+# from pyspark.sql.window import Window
 from spark_session_factory import *
 import os
 
+load_dotenv()
 
 def ingest_kafka_to_silver(spark: SparkSession):
+    df = spark.read.json(f"s3a://{os.getenv('MINIO_HISTORICAL_DATA_BUCKET')}/")
+    df.show()
+
     
 
 def run_etl(spark: SparkSession, input_path: str, output_path: str):
@@ -25,12 +30,13 @@ def run_etl(spark: SparkSession, input_path: str, output_path: str):
         output_path: Gold zone path (e.g., '/opt/spark-data/gold')
     """
     # TODO: Implement
-    df = spark.read.option("multiline", "true").json(input_path)
+    # df = spark.read.option("multiline", "true").json(input_path)
     
-    df.coalesce(1).write.mode("overwrite").parquet(output_path)
+    # df.coalesce(1).write.mode("overwrite").parquet(output_path)
 
-    df2 = spark.read.parquet(output_path)
-    df2.show()
+    # df2 = spark.read.parquet(output_path)
+    # df2.show()
+    ingest_kafka_to_silver(spark)
     
 
 
