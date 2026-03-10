@@ -15,6 +15,7 @@ from scripts.airnow_raw_historic_producer import (
     fetch_month_data,
     publish_raw_historical_records,
 )
+from util import constants
 from scripts.ingest_kafka_to_landing import consume_historical_data
 
 # Add scripts directory to path for imports
@@ -26,16 +27,21 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
+
 def produce_historical_data():
     """Execute the AirNow data producer"""
-    try:
-        start, end = get_times()
-        records = fetch_month_data(start, end)
-        publish_raw_historical_records(records)
-        print(f"✓ Published {len(records)} records to Kafka")
-    except Exception as e:
-        print(f"✗ Producer failed: {str(e)}")
-        raise
+    start, end = get_times()
+    for bbox in constants.BBOXES:
+        try:
+            records = fetch_month_data(start, end, bbox)
+            publish_raw_historical_records(records)
+            print(f"✓ Published {len(records)} records to Kafka")
+        except Exception as e:
+            print(
+                f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
+            )
+            raise
+
 
 with DAG(
     dag_id="streamflow_main",
@@ -82,4 +88,4 @@ with DAG(
     )
 
     # Set task dependencies
-    produce_data >> ingest_to_landing >> run_spark_etl >> validate_etl # type: ignore
+    produce_data >> ingest_to_landing >> run_spark_etl >> validate_etl  # type: ignore
