@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 # from pyspark.sql.window import Window
-from spark_session_factory import *
+from .spark_session_factory import *
 import os
 
 load_dotenv()
