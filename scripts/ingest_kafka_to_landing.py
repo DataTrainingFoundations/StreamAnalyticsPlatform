@@ -26,23 +26,24 @@ def consume_historical_data():
     # Create Kafka Consumer
     docker_env = os.getenv("DOCKER_ENV")
     bootstrap_server = (
-        constants.DOCKER_KAFKA_BOOTSTRAP_SERVER
+        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
         if docker_env == "1"
-        else constants.LOCAL_KAFKA_BOOTSTRAP_SERVER
+        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
     )
     consumer = KafkaConsumer(
-        constants.RAW_HISTORICAL_DATA_KAFKA_TOPIC,
+        os.getenv("RAW_HISTORICAL_DATA_KAFKA_TOPIC"),
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
         group_id="minio_writer_group",
         enable_auto_commit=True,
+        value_deserializer=lambda v: json.loads(v.decode())
     )
 
     # Create MinIO client and create bucket, if nonexistent
     endpoint = (
-        constants.DOCKER_MINIO_ENDPOINT
+        os.getenv("DOCKER_MINIO_ENDPOINT")
         if docker_env == "1"
-        else constants.LOCAL_MINIO_ENDPOINT
+        else os.getenv("LOCAL_MINIO_ENDPOINT")
     )
     s3_client = boto3.client(
         "s3",
@@ -52,9 +53,10 @@ def consume_historical_data():
     )
 
     existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
-    if constants.MINIO_HISTORICAL_DATA_BUCKET not in existing_buckets:
-        s3_client.create_bucket(Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET)
-        print(f"Created bucket: {constants.MINIO_HISTORICAL_DATA_BUCKET}")
+    historical_data_bucket = os.getenv("MINIO_HISTORICAL_DATA_BUCKET")
+    if historical_data_bucket and historical_data_bucket not in existing_buckets:
+        s3_client.create_bucket(Bucket=historical_data_bucket)
+        print(f"Created bucket: {historical_data_bucket}")
 
     # Consume and batch messages and insert into bucket
     batch = []
@@ -75,7 +77,7 @@ def consume_historical_data():
 
         for _, messages in records.items():
             for message in messages:
-                batch.append(message.value.decode())
+                batch.append(message.value)
 
         last_message_time = time.time()
 
@@ -84,7 +86,7 @@ def consume_historical_data():
             key = f"{uuid.uuid4()}.json"
 
             s3_client.put_object(
-                Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET,
+                Bucket=historical_data_bucket,
                 Key=key,
                 Body=json.dumps(batch).encode(),
             )
@@ -98,7 +100,7 @@ def consume_historical_data():
         key = f"{uuid.uuid4()}.json"
 
         s3_client.put_object(
-            Bucket=constants.MINIO_HISTORICAL_DATA_BUCKET,
+            Bucket=historical_data_bucket,
             Key=key,
             Body=json.dumps(batch).encode(),
         )

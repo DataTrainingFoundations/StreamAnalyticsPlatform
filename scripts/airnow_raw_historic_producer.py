@@ -8,25 +8,42 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import requests
 from kafka import KafkaProducer
+import boto3
 from dotenv import load_dotenv
 from util import constants
 
 load_dotenv()
 
-def get_times(oldest_date_time = None):
+def get_times(oldest_date_time=None):
     """
-    datetime(2026, 2, 28) is currently the default
-    oldest_date_time is currently None as we haven't passing anything in right now
-    the interval is by month so start is start of the month and end is end of the month
+    Returns start and end datetimes (as strings) for fetching a full month of historical data.
+    
+    - If oldest_date_time is None, defaults to previous month from today.
+    - If oldest_date_time is provided, fetches the month immediately **before** that date.
+    - Output format: "YYYY-MM-DDTHH" for API compatibility.
     """
     if oldest_date_time is None:
-        start = (datetime(2026, 2, 28, 0) - relativedelta(months=1)).strftime("%Y-%m-%dT%H")
-        end = (datetime(2026, 2, 28, 23) - timedelta(days=1)).strftime("%Y-%m-%dT%H")
+        # Default: previous month relative to today
+        today = datetime.now()
+        # First day of previous month
+        start_dt = (today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                    - relativedelta(months=1))
+        # Last day of previous month
+        end_dt = (today.replace(day=1, hour=23, minute=0, second=0, microsecond=0)
+                  - timedelta(days=1))
     else:
-        start = (oldest_date_time.replace(hour=0) - relativedelta(months=1)).strftime("%Y-%m-%dT%H")
-        end = (oldest_date_time.replace(hour=23) - timedelta(days=1)).strftime("%Y-%m-%dT%H")
-    return start, end
+        # Compute full month before oldest_date_time
+        oldest = oldest_date_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Start = first day of month before oldest
+        start_dt = (oldest.replace(day=1) - relativedelta(months=1))
+        # End = last day of month before oldest
+        end_dt = (oldest.replace(day=1, hour=23) - timedelta(days=1))
 
+    # Convert to API-compatible string
+    start_str = start_dt.strftime("%Y-%m-%dT%H")
+    end_str = end_dt.strftime("%Y-%m-%dT%H")
+
+    return start_str, end_str
 
 def fetch_month_data(start, end, bbox):
     """
@@ -52,28 +69,28 @@ def fetch_month_data(start, end, bbox):
     }
     return requests.get(airnow_url, params=params, timeout=300_000).json()
 
-
 def publish_raw_historical_records(records):
     """
     Publishes raw historical records to corresponding kafka topic
     """
     docker_env = os.getenv("DOCKER_ENV")
     bootstrap_server = (
-        constants.DOCKER_KAFKA_BOOTSTRAP_SERVER
+        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
         if docker_env == "1"
-        else constants.LOCAL_KAFKA_BOOTSTRAP_SERVER
+        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
     )
     producer = KafkaProducer(
         bootstrap_servers=bootstrap_server,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        value_serializer=lambda v: json.dumps(v).encode(),
     )
-
+    kafka_topic = os.getenv("RAW_HISTORICAL_DATA_KAFKA_TOPIC")
     for record in records:
         record["source"] = "airnow_historical"
         record["ingested_at"] = datetime.now().isoformat()
+        message_key = f"{record['FullAQSCode']}_{record['Parameter']}_{record['ingested_at']}".encode()
         producer.send(
-            constants.RAW_HISTORICAL_DATA_KAFKA_TOPIC,
-            key=record["FullAQSCode"].encode(),
+            kafka_topic,
+            key=message_key,
             value=record,
         )
 
