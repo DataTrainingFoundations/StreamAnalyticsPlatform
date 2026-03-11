@@ -29,13 +29,14 @@ def create_spark_session(
         config_overrides: Optional dictionary of additional Spark configs
     """
     docker_env = os.getenv("DOCKER_ENV")
+
     builder = (
         SparkSession.builder
         .appName(app_name) # type: ignore
         .master(master)
-        .config("spark.hadoop.fs.s3a.endpoint", constants.DOCKER_MINIO_ENDPOINT
+        .config("spark.hadoop.fs.s3a.endpoint", os.getenv("DOCKER_MINIO_ENDPOINT")
                 if docker_env == "1"
-                else constants.LOCAL_MINIO_ENDPOINT)
+                else os.getenv("LOCAL_MINIO_ENDPOINT"))
         .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ROOT_USER"))
         .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_ROOT_PASSWORD"))
         .config("spark.hadoop.fs.s3a.path.style.access", "true")

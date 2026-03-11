@@ -14,10 +14,11 @@ from util import constants
 
 load_dotenv()
 
+
 def get_times(oldest_date_time=None):
     """
     Returns start and end datetimes (as strings) for fetching a full month of historical data.
-    
+
     - If oldest_date_time is None, defaults to previous month from today.
     - If oldest_date_time is provided, fetches the month immediately **before** that date.
     - Output format: "YYYY-MM-DDTHH" for API compatibility.
@@ -26,18 +27,20 @@ def get_times(oldest_date_time=None):
         # Default: previous month relative to today
         today = datetime.now()
         # First day of previous month
-        start_dt = (today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                    - relativedelta(months=1))
+        start_dt = today.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ) - relativedelta(months=1)
         # Last day of previous month
-        end_dt = (today.replace(day=1, hour=23, minute=0, second=0, microsecond=0)
-                  - timedelta(days=1))
+        end_dt = today.replace(
+            day=1, hour=23, minute=0, second=0, microsecond=0
+        ) - timedelta(days=1)
     else:
         # Compute full month before oldest_date_time
         oldest = oldest_date_time.replace(hour=0, minute=0, second=0, microsecond=0)
         # Start = first day of month before oldest
-        start_dt = (oldest.replace(day=1) - relativedelta(months=1))
+        start_dt = oldest.replace(day=1) - relativedelta(months=1)
         # End = last day of month before oldest
-        end_dt = (oldest.replace(day=1, hour=23) - timedelta(days=1))
+        end_dt = oldest.replace(day=1, hour=23) - timedelta(days=1)
 
     # Convert to API-compatible string
     start_str = start_dt.strftime("%Y-%m-%dT%H")
@@ -45,12 +48,13 @@ def get_times(oldest_date_time=None):
 
     return start_str, end_str
 
+
 def fetch_month_data(start, end, bbox):
     """
     Fetches historical data (from yesterday to now by default)
     """
     api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_HISTORIC_DATA_URL", "")
+    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
@@ -61,13 +65,14 @@ def fetch_month_data(start, end, bbox):
         "startDate": start,
         "endDate": end,
         "parameters": "PM25,PM10,OZONE,NO2,CO,SO2",
-        "BBOX": bbox,  
+        "BBOX": bbox,
         "dataType": "A",
         "format": "application/json",
         "verbose": 1,
         "API_KEY": api_key,
     }
     return requests.get(airnow_url, params=params, timeout=300_000).json()
+
 
 def publish_raw_historical_records(records):
     """
@@ -87,10 +92,10 @@ def publish_raw_historical_records(records):
     for record in records:
         record["source"] = "airnow_historical"
         record["ingested_at"] = datetime.now().isoformat()
-        message_key = f"{record['FullAQSCode']}_{record['Parameter']}_{record['ingested_at']}".encode()
+        message_key = record['FullAQSCode'] + record['Parameter'] + record['ingested_at']
         producer.send(
             kafka_topic,
-            key=message_key,
+            key=message_key.encode(),
             value=record,
         )
 

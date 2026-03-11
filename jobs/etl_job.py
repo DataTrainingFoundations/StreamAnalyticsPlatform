@@ -5,45 +5,32 @@ Reads JSON from landing zone, applies transformations, writes CSV to gold zone.
 
 Pattern: ./data/landing/*.json -> (This Job) -> ./data/gold/
 """
+
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
+import time
+
 # from pyspark.sql.window import Window
 from .spark_session_factory import *
 import os
 
 load_dotenv()
 
-def ingest_kafka_to_silver(spark: SparkSession):
+def raw_to_bronze():
+    spark = get_or_create_session()
     df = spark.read.json(f"s3a://{os.getenv('MINIO_HISTORICAL_DATA_BUCKET')}/")
     df.show()
 
-    
+def bronze_to_silver():
+    pass
 
-def run_etl(spark: SparkSession, input_path: str, output_path: str):
-    """
-    Main ETL pipeline: read -> transform -> write.
-    
-    Args:
-        spark: Active SparkSession
-        input_path: Landing zone path (e.g., '/opt/spark-data/landing/*.json')
-        output_path: Gold zone path (e.g., '/opt/spark-data/gold')
-    """
-    # TODO: Implement
-    # df = spark.read.option("multiline", "true").json(input_path)
-    
-    # df.coalesce(1).write.mode("overwrite").parquet(output_path)
-
-    # df2 = spark.read.parquet(output_path)
-    # df2.show()
-    ingest_kafka_to_silver(spark)
-    
-
+def silver_to_gold():
+    pass
 
 if __name__ == "__main__":
-    # TODO: Create SparkSession, parse args, run ETL
-    spark = get_or_create_session()
-    input_path = r"/home/armin/project2/StreamAnalyticsPlatform/data/landing/testdata2.json"
-    output_path = r"/home/armin/project2/StreamAnalyticsPlatform/data/gold"
-
-    run_etl(spark, input_path, output_path)
+    raw_to_bronze()
+    time.sleep(60)
+    bronze_to_silver()
+    time.sleep(60)
+    silver_to_gold()
