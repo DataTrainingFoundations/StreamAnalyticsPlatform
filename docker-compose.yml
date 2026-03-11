@@ -102,7 +102,9 @@ services:
       - streamflow-network
 
   spark-master:
-    image: apache/spark:3.5.0
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
     container_name: streamflow-spark-master
     user: root
     ports:
@@ -124,7 +126,9 @@ services:
     
 
   spark-worker:
-    image: apache/spark:3.5.0
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
     container_name: streamflow-spark-worker
     user: root
     depends_on:
