@@ -102,7 +102,9 @@ services:
       - streamflow-network
 
   spark-master:
-    image: apache/spark:3.5.0
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
     container_name: streamflow-spark-master
     user: root
     ports:
@@ -115,14 +117,18 @@ services:
     volumes:
       - ./jobs:/opt/spark-jobs
       - spark_data:/opt/spark-data
+      - .:/workspace
     depends_on:
       spark-init:
         condition: service_completed_successfully
     networks:
       - streamflow-network
+    
 
   spark-worker:
-    image: apache/spark:3.5.0
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
     container_name: streamflow-spark-worker
     user: root
     depends_on:
