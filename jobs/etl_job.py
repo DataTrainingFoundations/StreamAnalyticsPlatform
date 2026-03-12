@@ -5,8 +5,8 @@ Reads JSON from landing zone and applies transformation from raw -> bronze -> si
 """
 
 import time
-# from pyspark.sql import SparkSession, DataFrame
-# from pyspark.sql import functions as F
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import functions as F
 
 # from pyspark.sql.window import Window
 from .spark_session_factory import get_or_create_session
@@ -23,7 +23,7 @@ def raw_to_bronze():
     """
     spark = get_or_create_session()
     df = spark.read.json("s3a://streamflow-data/landing/airnow/")
-    df.write.mode("append").partitionBy("date", "hour").parquet(
+    df.write.mode("append").partitionBy("date").parquet(
         "s3a://streamflow-data/bronze/airnow/"
     )
 
@@ -42,9 +42,26 @@ def bronze_to_silver():
 
     TODO: Implement silver transformation logic.
     """
-    # clean_df.write.mode("append") \
-    # .partitionBy("date") \
+    spark = get_or_create_session()
+    clean_df = spark.read.parquet("s3a://streamflow-data/bronze/airnow")
     # .parquet("s3a://streamflow-data/silver/airnow_clean/")
+    clean_df = clean_df.withColumn("concern_level", \
+                                F.when(clean_df.category == 1, "Good")
+                                .when(clean_df.category == 2, "Moderate")
+                                .when(clean_df.category == 3, "Unhealthy for Sensitive Groups")
+                                .when(clean_df.category == 4, "Unhealthy")
+                                .when(clean_df.category == 5, "Very Unhealthy")
+                                .when(clean_df.category == 6, "Hazardous")
+                                .otherwise(None))
+    clean_df = clean_df.drop("Category")
+    clean_df = clean_df.drop("FullAQSCode")
+    clean_df = clean_df.drop("UTC")
+    clean_df = clean_df.drop("ingested_at")
+    clean_df = clean_df.withColumn("composite_key",
+                                   F.concat_ws("_", F.col("date"), F.col("hour"), F.col("IntlAQSCode"), F.col("Parameter")))
+    clean_df = clean_df.drop_duplicates(["composite_key"])
+    clean_df = clean_df.toDF(*[c.lower() for c in clean_df.columns])
+    clean_df.write.mode("append").partitionBy("date").parquet("s3a://streamflow-data/silver/airnow_clean/")
 
 
 def silver_to_gold():
@@ -67,7 +84,7 @@ def silver_to_gold():
 if __name__ == "__main__":
     # Execute the ETL pipeline sequentially with delays between stages
     raw_to_bronze()
-    time.sleep(60)  # Wait 60 seconds before next transformation
+    # time.sleep(60)  # Wait 60 seconds before next transformation
     bronze_to_silver()
-    time.sleep(60)  # Wait 60 seconds before next transformation
+    # time.sleep(60)  # Wait 60 seconds before next transformation
     silver_to_gold()
