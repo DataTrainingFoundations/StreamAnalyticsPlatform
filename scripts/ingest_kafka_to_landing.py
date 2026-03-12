@@ -31,7 +31,7 @@ def consume_historical_data():
     Environment Variables Required:
         - DOCKER_ENV: Determines whether to use Docker or local environment settings
         - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
-        - RAW_DATA_KAFKA_TOPIC: Kafka topic to consume from
+        - RAW_HISTORIC_DATA_KAFKA_TOPIC: Kafka topic to consume from
         - DOCKER_MINIO_ENDPOINT / LOCAL_MINIO_ENDPOINT: MinIO endpoint URL
         - MINIO_ROOT_USER: MinIO access key
         - MINIO_ROOT_PASSWORD: MinIO secret key
@@ -52,7 +52,7 @@ def consume_historical_data():
     )
 
     consumer = KafkaConsumer(
-        os.getenv("RAW_DATA_KAFKA_TOPIC"),
+        os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC"),
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
         group_id="minio_writer_group",
