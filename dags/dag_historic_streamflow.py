@@ -5,22 +5,24 @@ Orchestrates: Data Producer -> Kafka Ingest -> Spark ETL -> Validation
 """
 
 from datetime import datetime, timedelta
-import sys
-import os
 from airflow import DAG
-from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from util import constants
 from scripts.airnow_raw_historic_producer import (
     get_times,
     fetch_month_data,
-    publish_raw_historical_records,
+    publish_raw_historical_records
 )
-from util import constants
-from scripts.ingest_kafka_to_landing import consume_historical_data
+from scripts.ingest_kafka_to_landing import (
+    consume_historical_data
+)
+from jobs.etl_job import (
+    raw_to_bronze,
+    bronze_to_silver,
+    silver_to_gold
+)
 
-# Add scripts directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../scripts"))
-
+# Default arguments for all tasks in the DAG
 default_args = {
     "owner": "student",
     "retries": 1,
@@ -29,13 +31,32 @@ default_args = {
 
 
 def produce_historical_data():
-    """Execute the AirNow data producer"""
+    """
+    Execute the AirNow data producer to fetch and publish historical air quality data.
+
+    This function fetches historical air quality data for the previous month from multiple
+    bounding boxes (limited to first 5 for testing) and publishes the records to Kafka.
+    It's designed to be called as an Airflow task.
+
+    The function will raise an exception if any bounding box fails to process,
+    causing the Airflow task to fail and potentially retry.
+
+    Environment Variables Required:
+        - Constants from util.constants (BBOXES list)
+
+    Raises:
+        Exception: If data fetching or publishing fails for any bounding box.
+    """
     start, end = get_times()
+    i = 0
     for bbox in constants.BBOXES:
         try:
+            if i == 5:
+                break
             records = fetch_month_data(start, end, bbox)
             publish_raw_historical_records(records)
             print(f"✓ Published {len(records)} records to Kafka")
+            i += 1
         except Exception as e:
             print(
                 f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
@@ -43,49 +64,55 @@ def produce_historical_data():
             raise
 
 
+# Define the DAG with its configuration
 with DAG(
-    dag_id="streamflow_main",
+    dag_id="streamflow_historic",
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
     start_date=datetime(2024, 1, 1),
-    schedule_interval=None,
-    catchup=False,
+    schedule=None,  # Manual trigger only
+    catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
 ) as dag:
 
     # Task 1: Produce raw data from AirNow API to Kafka
-    produce_data = PythonOperator(
-        task_id="produce_raw_data",
+    produce_raw_data = PythonOperator(
+        task_id="produce_raw_data_to_kafka",
         python_callable=produce_historical_data,
         doc="Fetch historical air quality data from AirNow API and publish to Kafka",
     )
 
     # Task 2: Consume Kafka messages and write to landing zone (MinIO)
     ingest_to_landing = PythonOperator(
-        task_id="consume_kafka_to_landing",
+        task_id="ingest_raw_data_to_warehouse",
         python_callable=consume_historical_data,
         doc="Consume from Kafka topic and write batch to MinIO landing zone",
     )
 
-    # Task 3: Run Spark ETL job (landing -> gold zone transformation)
-    run_spark_etl = BashOperator(
-        task_id="run_spark_etl",
-        bash_command=(
-            "spark-submit "
-            "--master spark://spark-master:7077 "
-            "/opt/spark-jobs/etl_job.py "
-            "--input-path /opt/spark-data/landing "
-            "--output-path /opt/spark-data/gold"
-        ),
-        doc="Spark ETL: Transform landing zone data and write to gold zone",
+    # Task 3: Use Spark to read raw data and transform to bronze (json -> parquet)
+    transform_raw_to_bronze = PythonOperator(
+        task_id="transform_raw_to_bronze",
+        python_callable=raw_to_bronze,
+        doc="Transform landing zone data and write to bronze zone",
     )
 
-    # Task 4: Validate ETL output
-    validate_etl = BashOperator(
-        task_id="validate_etl_output",
-        bash_command='find /opt/spark-data/gold -type f -name "*.csv" | head -5 && echo "✓ ETL validation passed"',
-        doc="Verify that gold zone contains transformed data files",
+    # Task 4: Use Spark to read bronze data and transform to silver (clean data)
+    transform_bronze_to_silver = PythonOperator(
+        task_id="transform_bronze_to_silver",
+        python_callable=bronze_to_silver,
+        doc="Transform bronze zone data and write to silver zone",
     )
 
-    # Set task dependencies
-    produce_data >> ingest_to_landing >> run_spark_etl >> validate_etl  # type: ignore
+    # Task 5: Use Spark to read silver data and transform to gold (star schema)
+    transform_silver_to_gold = PythonOperator(
+        task_id="transform_silver_to_gold",
+        python_callable=silver_to_gold,
+        doc="Transform silver zone data and write to gold zone",
+    )
+
+    # Set task dependencies: execute tasks sequentially
+    produce_raw_data >> \
+        ingest_to_landing >> \
+            transform_raw_to_bronze >> \
+                transform_bronze_to_silver >> \
+                    transform_silver_to_gold

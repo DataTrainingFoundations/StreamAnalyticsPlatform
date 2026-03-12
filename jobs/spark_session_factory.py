@@ -8,16 +8,24 @@ import os
 import sys
 from pyspark.sql import SparkSession
 from dotenv import load_dotenv
-from util import *
+from util import constants
 
 load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-spark_app_name = os.getenv("SPARK_APP_NAME", "AirNowStreamAnalytics")
-spark_master = os.getenv("SPARK_MASTER", "local[*]")
+docker_env = os.getenv("DOCKER_ENV")
+
+spark_master = (
+  os.getenv("DOCKER_SPARK_MASTER")
+  if docker_env == "1"
+  else "local[*]"
+)
+
+if not spark_master:
+    raise ValueError("Missing DOCKER_SPARK_MASTER value")
 
 def create_spark_session(
-    app_name: str = spark_app_name,
+    app_name: str = constants.SPARK_APP_NAME,
     master: str = spark_master,
     config_overrides: Optional[dict] = None
 ) -> SparkSession:
@@ -29,13 +37,14 @@ def create_spark_session(
         config_overrides: Optional dictionary of additional Spark configs
     """
     docker_env = os.getenv("DOCKER_ENV")
+
     builder = (
         SparkSession.builder
         .appName(app_name) # type: ignore
         .master(master)
-        .config("spark.hadoop.fs.s3a.endpoint", constants.DOCKER_MINIO_ENDPOINT
+        .config("spark.hadoop.fs.s3a.endpoint", os.getenv("DOCKER_MINIO_ENDPOINT")
                 if docker_env == "1"
-                else constants.LOCAL_MINIO_ENDPOINT)
+                else os.getenv("LOCAL_MINIO_ENDPOINT"))
         .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ROOT_USER"))
         .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_ROOT_PASSWORD"))
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
@@ -56,7 +65,7 @@ def create_spark_session(
     return spark
 
 
-def get_or_create_session(app_name: str = spark_app_name) -> SparkSession:
+def get_or_create_session(app_name: str = constants.SPARK_APP_NAME) -> SparkSession:
     """
     Return the active SparkSession or create a default one.
     Safe to call from etl_job.py without risking duplicate sessions.

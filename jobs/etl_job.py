@@ -1,76 +1,73 @@
 """
 StreamFlow ETL Job - PySpark Transformation Pipeline
 
-Reads JSON from landing zone, applies transformations, writes CSV to gold zone.
-
-Pattern: ./data/landing/*.json -> (This Job) -> ./data/gold/
+Reads JSON from landing zone and applies transformation from raw -> bronze -> silver -> gold
 """
-from dotenv import load_dotenv
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
+
+import time
+# from pyspark.sql import SparkSession, DataFrame
+# from pyspark.sql import functions as F
+
 # from pyspark.sql.window import Window
-from .spark_session_factory import *
-import os
-from util import constants
-from pyspark.sql.types import StructType, StructField, DoubleType, IntegerType, StringType, TimestampType
+from .spark_session_factory import get_or_create_session
 
-
-load_dotenv()
-
-def ingest_kafka_to_silver(spark: SparkSession):
-    schema = StructType([
-        StructField("Latitude", DoubleType(), True),
-        StructField("Longitude", DoubleType(), True),
-        StructField("UTC", StringType(), True),  # Or TimestampType() if you want automatic parsing
-        StructField("Parameter", StringType(), True),
-        StructField("Unit", StringType(), True),
-        StructField("AQI", IntegerType(), True),
-        StructField("Category", IntegerType(), True),
-        StructField("SiteName", StringType(), True),
-        StructField("AgencyName", StringType(), True),
-        StructField("FullAQSCode", StringType(), True),
-        StructField("IntlAQSCode", StringType(), True)
-    ])
-    df = spark.read.schema(schema).json(f"s3a://{constants.MINIO_HISTORICAL_DATA_BUCKET}/*.json")
-    # df = df.filter(F.col("_corrupt_record").isNull())
-    df.show()
-
-    
-def clean_data(spark: SparkSession, df: DataFrame):
-    cleaned_data = df.withColumn("concern_level", \
-                                F.when(df.category == 1, "Good")
-                                .when(df.category == 2, "Moderate")
-                                .when(df.category == 3, "Unhealthy for Sensitive Groups")
-                                .when(df.category == 4, "Unhealthy")
-                                .when(df.category == 5, "Very Unhealthy")
-                                .when(df.category == 6, "Hazardous")
-                                .otherwise(None))
-    cleaned_data = cleaned_data.drop("category")          
-
-def run_etl(spark: SparkSession, input_path: str, output_path: str):
+def raw_to_bronze():
     """
-    Main ETL pipeline: read -> transform -> write.
-    
-    Args:
-        spark: Active SparkSession
-        input_path: Landing zone path (e.g., '/opt/spark-data/landing/*.json')
-        output_path: Gold zone path (e.g., '/opt/spark-data/gold')
-    """
-    # TODO: Implement
-    # df = spark.read.option("multiline", "true").json(input_path)
-    
-    # df.coalesce(1).write.mode("overwrite").parquet(output_path)
+    Transform raw JSON data from the landing zone to the bronze layer.
 
-    # df2 = spark.read.parquet(output_path)
-    # df2.show()
-    ingest_kafka_to_silver(spark)
-    
+    Reads JSON files from the S3 landing zone, partitions by date and hour,
+    and writes them as Parquet files to the bronze zone for further processing.
+
+    Raises:
+        Exception: If Spark session creation or data reading/writing fails.
+    """
+    spark = get_or_create_session()
+    df = spark.read.json("s3a://streamflow-data/landing/airnow/")
+    df.write.mode("append").partitionBy("date", "hour").parquet(
+        "s3a://streamflow-data/bronze/airnow/"
+    )
+
+
+def bronze_to_silver():
+    """
+    Transform bronze layer data to silver layer by cleaning and standardizing.
+
+    This function is a placeholder for data cleaning operations such as:
+    - Removing duplicates
+    - Handling missing values
+    - Standardizing data types
+    - Filtering invalid records
+
+    Currently not implemented (TODO).
+
+    TODO: Implement silver transformation logic.
+    """
+    # clean_df.write.mode("append") \
+    # .partitionBy("date") \
+    # .parquet("s3a://streamflow-data/silver/airnow_clean/")
+
+
+def silver_to_gold():
+    """
+    Transform silver layer data to gold layer by aggregating into star schema.
+
+    This function is a placeholder for creating fact and dimension tables:
+    - Creating air quality fact table
+    - Building dimension tables (e.g., location, time, pollutant)
+    - Aggregating metrics for analytics
+
+    Currently not implemented (TODO).
+
+    TODO: Implement gold transformation logic.
+    """
+    # fact_df.write.mode("overwrite") \
+    # .parquet("s3a://streamflow-data/gold/air_quality_fact/")
 
 
 if __name__ == "__main__":
-    # TODO: Create SparkSession, parse args, run ETL
-    spark = get_or_create_session()
-    input_path = r"/home/armin/project2/StreamAnalyticsPlatform/data/landing/testdata2.json"
-    output_path = r"/home/armin/project2/StreamAnalyticsPlatform/data/gold"
-
-    run_etl(spark, input_path, output_path)
+    # Execute the ETL pipeline sequentially with delays between stages
+    raw_to_bronze()
+    time.sleep(60)  # Wait 60 seconds before next transformation
+    bronze_to_silver()
+    time.sleep(60)  # Wait 60 seconds before next transformation
+    silver_to_gold()
