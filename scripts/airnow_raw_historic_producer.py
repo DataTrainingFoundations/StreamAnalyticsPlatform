@@ -176,7 +176,7 @@ def publish_raw_historical_records(records):
     kafka_topic = os.getenv("RAW_HISTORICAL_DATA_KAFKA_TOPIC")
     for record in records:
         record["ingested_at"] = datetime.now().isoformat()
-        message_key = f"{record['FullAQSCode']}_{record['Parameter']}"
+        message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
         producer.send(
             kafka_topic,
             key=message_key.encode(),
