@@ -48,6 +48,12 @@ def get_oldest_record_date(bucket_name=None, prefix="landing/airnow/", s3_client
             aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
         )
 
+    # Create bucket, if nonexistent
+    existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
+    if bucket_name not in existing_buckets:
+        s3_client.create_bucket(Bucket=bucket_name)
+        print(f"Created bucket: {bucket_name}")
+
     # List all objects under the prefix
     paginator = s3_client.get_paginator("list_objects_v2")
     dates = []
