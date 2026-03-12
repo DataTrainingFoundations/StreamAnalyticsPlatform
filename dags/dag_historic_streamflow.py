@@ -22,6 +22,7 @@ from jobs.etl_job import (
     silver_to_gold
 )
 
+# Default arguments for all tasks in the DAG
 default_args = {
     "owner": "student",
     "retries": 1,
@@ -30,7 +31,22 @@ default_args = {
 
 
 def produce_historical_data():
-    """Execute the AirNow data producer"""
+    """
+    Execute the AirNow data producer to fetch and publish historical air quality data.
+
+    This function fetches historical air quality data for the previous month from multiple
+    bounding boxes (limited to first 5 for testing) and publishes the records to Kafka.
+    It's designed to be called as an Airflow task.
+
+    The function will raise an exception if any bounding box fails to process,
+    causing the Airflow task to fail and potentially retry.
+
+    Environment Variables Required:
+        - Constants from util.constants (BBOXES list)
+
+    Raises:
+        Exception: If data fetching or publishing fails for any bounding box.
+    """
     start, end = get_times()
     i = 0
     for bbox in constants.BBOXES:
@@ -48,13 +64,14 @@ def produce_historical_data():
             raise
 
 
+# Define the DAG with its configuration
 with DAG(
     dag_id="streamflow_historic",
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
     start_date=datetime(2024, 1, 1),
-    schedule=None,
-    catchup=False,
+    schedule=None,  # Manual trigger only
+    catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
 ) as dag:
 
@@ -93,7 +110,7 @@ with DAG(
         doc="Transform silver zone data and write to gold zone",
     )
 
-    # Set task dependencies
+    # Set task dependencies: execute tasks sequentially
     produce_raw_data >> \
         ingest_to_landing >> \
             transform_raw_to_bronze >> \

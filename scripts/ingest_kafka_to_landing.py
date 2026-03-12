@@ -10,6 +10,7 @@ import json
 import time
 import os
 import uuid
+from collections import defaultdict
 import boto3
 from kafka import KafkaConsumer
 from dotenv import load_dotenv
@@ -17,29 +18,51 @@ from util import constants
 
 load_dotenv()
 
-
 def consume_historical_data():
     """
-    Consume historical data from Kafka and write to landing zone (MinIO).
-    """
+    Consume historical data from Kafka and write to MinIO with date/hour partitioning.
 
-    # Create Kafka Consumer
+    This function sets up a Kafka consumer to poll messages from the raw historical data topic,
+    groups the records by date and hour, and writes them to MinIO (S3-compatible storage)
+    in the landing zone with appropriate partitioning for efficient querying.
+
+    The function will exit if no messages are received for a configurable idle time.
+
+    Environment Variables Required:
+        - DOCKER_ENV: Determines whether to use Docker or local environment settings
+        - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
+        - RAW_HISTORICAL_DATA_KAFKA_TOPIC: Kafka topic to consume from
+        - DOCKER_MINIO_ENDPOINT / LOCAL_MINIO_ENDPOINT: MinIO endpoint URL
+        - MINIO_ROOT_USER: MinIO access key
+        - MINIO_ROOT_PASSWORD: MinIO secret key
+        - STREAMFLOW_BUCKET: MinIO bucket name
+
+    Raises:
+        Exception: If Kafka consumer setup or MinIO operations fail.
+    """
     docker_env = os.getenv("DOCKER_ENV")
+
+    # -----------------------------
+    # Setup Kafka consumer
+    # -----------------------------
     bootstrap_server = (
         os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
         if docker_env == "1"
         else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
     )
+
     consumer = KafkaConsumer(
         os.getenv("RAW_HISTORICAL_DATA_KAFKA_TOPIC"),
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
         group_id="minio_writer_group",
         enable_auto_commit=True,
-        value_deserializer=lambda v: json.loads(v.decode())
+        value_deserializer=lambda v: json.loads(v.decode()),
     )
 
-    # Create MinIO client and create bucket, if nonexistent
+    # -----------------------------
+    # Setup MinIO client
+    # -----------------------------
     endpoint = (
         os.getenv("DOCKER_MINIO_ENDPOINT")
         if docker_env == "1"
@@ -52,20 +75,21 @@ def consume_historical_data():
         aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
     )
 
+    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
+
+    # Create bucket, if nonexistent
     existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
-    historical_data_bucket = os.getenv("MINIO_HISTORICAL_DATA_BUCKET")
-    if historical_data_bucket and historical_data_bucket not in existing_buckets:
-        s3_client.create_bucket(Bucket=historical_data_bucket)
-        print(f"Created bucket: {historical_data_bucket}")
+    if streamflow_bucket not in existing_buckets:
+        s3_client.create_bucket(Bucket=streamflow_bucket)
+        print(f"Created bucket: {streamflow_bucket}")
 
-    # Consume and batch messages and insert into bucket
-    batch = []
+    # -----------------------------
+    # Start consuming messages
+    # -----------------------------
     last_message_time = time.time()
-
-    print("Starting Kafka batch consumption...")
+    print("Starting Kafka consumption...")
 
     while True:
-
         records = consumer.poll(timeout_ms=1000)
 
         if not records:
@@ -75,41 +99,35 @@ def consume_historical_data():
                 break
             continue
 
-        for _, messages in records.items():
-            for message in messages:
-                batch.append(message.value)
-
         last_message_time = time.time()
 
-        if len(batch) >= constants.KAFKA_BATCH_SIZE:
+        # Flatten polled messages
+        messages = [msg.value for msgs in records.values() for msg in msgs]
 
-            key = f"{uuid.uuid4()}.json"
+        # -----------------------------
+        # Group by date/hour partitions
+        # -----------------------------
+        date_partitions = defaultdict(lambda: defaultdict(list))
+        for record in messages:
+            date, hour = record["UTC"].split("T")
+            hour = hour[:2]  # Keep only hour and drop minutes
+            date_partitions[date][hour].append(record)
 
-            s3_client.put_object(
-                Bucket=historical_data_bucket,
-                Key=key,
-                Body=json.dumps(batch).encode(),
-            )
-
-            print(f"Wrote {len(batch)} messages to MinIO as {key}")
-
-            batch = []
-
-    # Write remaining messages
-    if batch:
-        key = f"{uuid.uuid4()}.json"
-
-        s3_client.put_object(
-            Bucket=historical_data_bucket,
-            Key=key,
-            Body=json.dumps(batch).encode(),
-        )
-
-        print(f"Wrote final {len(batch)} messages to MinIO")
+        # -----------------------------
+        # Write files per date/hour
+        # -----------------------------
+        for date, hour_partitions in date_partitions.items():
+            for hour, records in hour_partitions.items():
+                key = f"landing/airnow/date={date}/hour={hour}/{uuid.uuid4()}.json"
+                s3_client.put_object(
+                    Bucket=streamflow_bucket,
+                    Key=key,
+                    Body="\n".join(json.dumps(r) for r in records).encode(),
+                )
+                print(f"Wrote {len(records)} records to {key}")
 
     consumer.close()
-
-    print("Kafka batch ingestion complete.")
+    print("Kafka ingestion complete.")
 
 if __name__ == "__main__":
     consume_historical_data()

@@ -2,9 +2,9 @@
 Constants for project
 """
 
-KAFKA_BATCH_SIZE = 100        # Messages per batch
-KAFKA_BATCH_INTERVAL = 5     # Seconds before writing batch even if not full
-MAX_KAFKA_CONSUMER_IDLE_TIME = 10  # seconds before exiting kafka consumer task
+POLLUTANTS = "PM25,PM10,OZONE,NO2,CO,SO2"
+
+MAX_KAFKA_CONSUMER_IDLE_TIME = 30  # seconds before exiting kafka consumer task
 
 SPARK_APP_NAME="AirNowStreamAnalytics"
 
