@@ -11,14 +11,41 @@ from pyspark.sql import functions as F
 # from pyspark.sql.window import Window
 from .spark_session_factory import *
 import os
+from util import constants
+from pyspark.sql.types import StructType, StructField, DoubleType, IntegerType, StringType, TimestampType
+
 
 load_dotenv()
 
 def ingest_kafka_to_silver(spark: SparkSession):
-    df = spark.read.json(f"s3a://{os.getenv('MINIO_HISTORICAL_DATA_BUCKET')}/")
+    schema = StructType([
+        StructField("Latitude", DoubleType(), True),
+        StructField("Longitude", DoubleType(), True),
+        StructField("UTC", StringType(), True),  # Or TimestampType() if you want automatic parsing
+        StructField("Parameter", StringType(), True),
+        StructField("Unit", StringType(), True),
+        StructField("AQI", IntegerType(), True),
+        StructField("Category", IntegerType(), True),
+        StructField("SiteName", StringType(), True),
+        StructField("AgencyName", StringType(), True),
+        StructField("FullAQSCode", StringType(), True),
+        StructField("IntlAQSCode", StringType(), True)
+    ])
+    df = spark.read.schema(schema).json(f"s3a://{constants.MINIO_HISTORICAL_DATA_BUCKET}/*.json")
+    # df = df.filter(F.col("_corrupt_record").isNull())
     df.show()
 
     
+def clean_data(spark: SparkSession, df: DataFrame):
+    cleaned_data = df.withColumn("concern_level", \
+                                F.when(df.category == 1, "Good")
+                                .when(df.category == 2, "Moderate")
+                                .when(df.category == 3, "Unhealthy for Sensitive Groups")
+                                .when(df.category == 4, "Unhealthy")
+                                .when(df.category == 5, "Very Unhealthy")
+                                .when(df.category == 6, "Hazardous")
+                                .otherwise(None))
+    cleaned_data = cleaned_data.drop("category")          
 
 def run_etl(spark: SparkSession, input_path: str, output_path: str):
     """
