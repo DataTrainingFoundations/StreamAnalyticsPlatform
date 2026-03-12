@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from util import constants
-from scripts.airnow_raw_data_producer import (
+from scripts.airnow_raw_producers import (
     fetch_cur_data,
     publish_raw_historical_records
 )
