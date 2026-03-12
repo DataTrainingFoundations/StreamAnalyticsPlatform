@@ -8,16 +8,16 @@ from datetime import datetime
 import requests
 from kafka import KafkaProducer
 from dotenv import load_dotenv
-from util import constants
+# from util import constants
 
 load_dotenv()
 
 def fetch_current_data(bbox):
     """
-    Fetches historical data (from yesterday to now by default)
+    Fetches historical data (from the last hour by default)
     """
     api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
+    airnow_url = os.getenv("AIRNOW_HISTORIC_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
@@ -37,7 +37,7 @@ def fetch_current_data(bbox):
 
 def publish_raw_current_records(records):
     """
-    Publishes raw historical records to corresponding kafka topic
+    Publishes raw current records to corresponding kafka topic
     """
     docker_env = os.getenv("DOCKER_ENV")
     bootstrap_server = (
@@ -74,10 +74,14 @@ def main():
             print(records, "\n\n")
             publish_raw_current_records(records)
             break
-        except:
-            print(f"failed at {bbox}")
+        except Exception as e:
+            print(f"failed at {bbox} : {str(e)}")
             break
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    records = fetch_current_data("-117.119,32.6312,-112.463,34.6119")
+    print("\n\nRecords Retrieved:\n\n")
+    print(records, "\n\n")
+    print(len(records))

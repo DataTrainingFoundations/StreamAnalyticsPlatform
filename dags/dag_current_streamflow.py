@@ -10,10 +10,9 @@ import os
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
-from scripts.airnow_raw_data_producer import (
-    get_times,
-    fetch_month_data,
-    publish_raw_historical_records,
+from scripts.airnow_raw_current_producer import (
+    fetch_current_data,
+    publish_raw_current_records,
 )
 from util import constants
 from scripts.ingest_kafka_to_landing import consume_historical_data
