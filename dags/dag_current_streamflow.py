@@ -27,17 +27,16 @@ default_args = {
 }
 
 
-def produce_historical_data():
+def produce_current_data():
     """Execute the AirNow data producer"""
-    start, end = get_times()
     for bbox in constants.BBOXES:
         try:
-            records = fetch_month_data(start, end, bbox)
-            publish_raw_historical_records(records)
-            print(f"✓ Published {len(records)} records to Kafka")
+            records = fetch_current_data(bbox)
+            publish_raw_current_records(records)
+            print(f"Published {len(records)} from {bbox} records to Kafka")
         except Exception as e:
             print(
-                f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
+                f"Producer failed at {bbox} for time period {datetime.now()}: {str(e)}"
             )
             raise
 
