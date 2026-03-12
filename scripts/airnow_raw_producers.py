@@ -66,7 +66,6 @@ def get_oldest_record_date(bucket_name=None, prefix="landing/airnow/", s3_client
     else:
         return None  # No data found
 
-
 def get_times(oldest_date_time=None):
     """
     Returns start and end datetimes (as strings) for fetching a full month of historical data.
@@ -159,7 +158,7 @@ def publish_raw_historical_records(records):
     Environment Variables:
         - DOCKER_ENV: Determines whether to use Docker or local Kafka settings
         - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
-        - RAW_HISTORICAL_DATA_KAFKA_TOPIC: Target Kafka topic name
+        - RAW_HISTORIC_DATA_KAFKA_TOPIC: Target Kafka topic name
 
     Raises:
         kafka.KafkaError: If publishing to Kafka fails.
@@ -173,7 +172,7 @@ def publish_raw_historical_records(records):
         bootstrap_servers=bootstrap_server,
         value_serializer=lambda v: json.dumps(v).encode(),
     )
-    kafka_topic = os.getenv("RAW_HISTORICAL_DATA_KAFKA_TOPIC")
+    kafka_topic = os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC")
     for record in records:
         record["ingested_at"] = datetime.now().isoformat()
         message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
