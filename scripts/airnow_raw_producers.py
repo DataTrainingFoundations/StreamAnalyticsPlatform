@@ -18,6 +18,7 @@ from util import constants
 load_dotenv()
 
 docker_env = os.getenv("DOCKER_ENV")
+dev = os.getenv("DEV")
 
 def get_oldest_record_date():
     """
@@ -33,20 +34,26 @@ def get_oldest_record_date():
     """
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    # for use with MinIO
-
-    # endpoint = (
-    #     os.getenv("DOCKER_MINIO_ENDPOINT")
-    #     if docker_env == "1"
-    #     else os.getenv("LOCAL_MINIO_ENDPOINT")
-    # )
-
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_USER"),
-        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-        region_name="us-east-1",
+    s3_client = (
+        boto3.client(
+            "s3",
+            aws_access_key_id=os.getenv("AWS_USER"),
+            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+            region_name="us-east-1",
+        )
+        if dev == "1"
+        else boto3.client(
+            "s3",
+            endpoint=(
+                os.getenv("DOCKER_MINIO_ENDPOINT")
+                if docker_env == "1"
+                else os.getenv("LOCAL_MINIO_ENDPOINT")
+            ),
+            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        )
     )
+
     try:
         progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
         if progress_key:
@@ -196,10 +203,11 @@ def run_historic_producer():
     i = 0
     for bbox in constants.BBOXES:
         try:
-            if i == 5:
+            if i == 5 and dev == "1":
                 break
             records = fetch_month_data(start, end, bbox)
             publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+            i += 1
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
