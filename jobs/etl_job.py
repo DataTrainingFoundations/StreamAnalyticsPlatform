@@ -46,12 +46,12 @@ def bronze_to_silver():
     clean_df = spark.read.parquet("s3a://streamflow-data/bronze/airnow")
     # .parquet("s3a://streamflow-data/silver/airnow_clean/")
     clean_df = clean_df.withColumn("concern_level", \
-                                F.when(clean_df.category == 1, "Good")
-                                .when(clean_df.category == 2, "Moderate")
-                                .when(clean_df.category == 3, "Unhealthy for Sensitive Groups")
-                                .when(clean_df.category == 4, "Unhealthy")
-                                .when(clean_df.category == 5, "Very Unhealthy")
-                                .when(clean_df.category == 6, "Hazardous")
+                                F.when(clean_df.Category == 1, "Good")
+                                .when(clean_df.Category == 2, "Moderate")
+                                .when(clean_df.Category == 3, "Unhealthy for Sensitive Groups")
+                                .when(clean_df.Category == 4, "Unhealthy")
+                                .when(clean_df.Category == 5, "Very Unhealthy")
+                                .when(clean_df.Category == 6, "Hazardous")
                                 .otherwise(None))
     clean_df = clean_df.drop("Category")
     clean_df = clean_df.drop("FullAQSCode")
@@ -77,14 +77,17 @@ def silver_to_gold():
 
     TODO: Implement gold transformation logic.
     """
+    spark = get_or_create_session()
+    silver_df = spark.read.parquet("s3a://streamflow-data/silver/airnow_clean")
+    silver_df.show()
     # fact_df.write.mode("overwrite") \
     # .parquet("s3a://streamflow-data/gold/air_quality_fact/")
 
 
 if __name__ == "__main__":
     # Execute the ETL pipeline sequentially with delays between stages
-    raw_to_bronze()
+    # raw_to_bronze()
     # time.sleep(60)  # Wait 60 seconds before next transformation
-    bronze_to_silver()
+    # bronze_to_silver()
     # time.sleep(60)  # Wait 60 seconds before next transformation
     silver_to_gold()
