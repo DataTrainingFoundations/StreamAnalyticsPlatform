@@ -24,10 +24,10 @@ def raw_to_bronze():
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read JSON data from the landing zone in S3
-    df = spark.read.json("s3a://streamflow-data/landing/airnow/")
+    df = spark.read.json("s3a://stream-analytics-project-bucket/landing/airnow/")
     # Write the data in Parquet format to the bronze zone, partitioned by date
     df.write.mode("append").partitionBy("date").parquet(
-        "s3a://streamflow-data/bronze/airnow/"
+        "s3a://stream-analytics-project-bucket/bronze/airnow/"
     )
 
 
@@ -45,7 +45,7 @@ def bronze_to_silver():
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read Parquet data from the bronze layer
-    clean_df = spark.read.parquet("s3a://streamflow-data/bronze/airnow")
+    clean_df = spark.read.parquet("s3a://stream-analytics-project-bucket/bronze/airnow")
     # Add a new column 'concern_level' based on the 'Category' value
     clean_df = clean_df.withColumn("concern_level", \
                                 F.when(clean_df.Category == 1, "Good")
@@ -68,7 +68,7 @@ def bronze_to_silver():
     # Convert all column names to lowercase for consistency
     clean_df = clean_df.toDF(*[c.lower() for c in clean_df.columns])
     # Write the cleaned data to the silver layer, partitioned by date
-    clean_df.write.mode("append").partitionBy("date").parquet("s3a://streamflow-data/silver/airnow_clean/")
+    clean_df.write.mode("append").partitionBy("date").parquet("s3a://stream-analytics-project-bucket/silver/airnow_clean/")
 
 
 def silver_to_gold():
@@ -86,13 +86,13 @@ def silver_to_gold():
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read cleaned Parquet data from the silver layer
-    silver_df = spark.read.parquet("s3a://streamflow-data/silver/airnow_clean")
+    silver_df = spark.read.parquet("s3a://stream-analytics-project-bucket/silver/airnow_clean")
     # Display the data for inspection (temporary)
     silver_df.show()
     # TODO: Implement aggregation logic to create fact and dimension tables
     # Example: Create fact table with aggregated air quality metrics
     # fact_df = silver_df.groupBy("date", "location").agg(F.avg("value").alias("avg_value"))
-    # fact_df.write.mode("overwrite").parquet("s3a://streamflow-data/gold/air_quality_fact/")
+    # fact_df.write.mode("overwrite").parquet("s3a://stream-analytics-project-bucket/gold/air_quality_fact/")
 
 
 if __name__ == "__main__":
