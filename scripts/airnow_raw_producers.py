@@ -41,7 +41,7 @@ def get_oldest_record_date():
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
             region_name="us-east-1",
         )
-        if dev == "1"
+        if dev != "1"
         else boto3.client(
             "s3",
             endpoint=(

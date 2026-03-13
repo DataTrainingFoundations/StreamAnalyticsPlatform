@@ -19,6 +19,8 @@ from util import constants
 
 load_dotenv()
 
+dev = os.getenv("DEV")
+
 def consume_data(kafka_topic: str):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
@@ -67,11 +69,24 @@ def consume_data(kafka_topic: str):
     # -----------------------------
     # Setup MinIO client
     # -----------------------------
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_USER"),
-        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-        region_name="us-east-1"
+    s3_client = (
+        boto3.client(
+            "s3",
+            aws_access_key_id=os.getenv("AWS_USER"),
+            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+            region_name="us-east-1",
+        )
+        if dev != "1"
+        else boto3.client(
+            "s3",
+            endpoint=(
+                os.getenv("DOCKER_MINIO_ENDPOINT")
+                if docker_env == "1"
+                else os.getenv("LOCAL_MINIO_ENDPOINT")
+            ),
+            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        )
     )
 
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")

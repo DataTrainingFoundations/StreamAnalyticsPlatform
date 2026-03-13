@@ -10,22 +10,31 @@ import boto3
 load_dotenv()
 
 docker_env = os.getenv("DOCKER_ENV")
+dev = os.getenv("DEV")
 
 def move_processed_data(source_prefix, dest_prefix):
     """
     Move all objects from one prefix to another using batch deletes.
     Works with S3 and MinIO.
     """
-    endpoint = (
-        os.getenv("DOCKER_MINIO_ENDPOINT")
-        if docker_env == "1"
-        else os.getenv("LOCAL_MINIO_ENDPOINT")
-    )
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-        aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+    s3 = (
+        boto3.client(
+            "s3",
+            aws_access_key_id=os.getenv("AWS_USER"),
+            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+            region_name="us-east-1",
+        )
+        if dev != "1"
+        else boto3.client(
+            "s3",
+            endpoint=(
+                os.getenv("DOCKER_MINIO_ENDPOINT")
+                if docker_env == "1"
+                else os.getenv("LOCAL_MINIO_ENDPOINT")
+            ),
+            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        )
     )
 
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
