@@ -226,6 +226,43 @@ def fetch_month_data(start, end, bbox):
     }
     return requests.get(airnow_url, params=params, timeout=300).json()
 
+def fetch_current_data(bbox):
+    """
+    Fetches current hour of air quality data from the AirNow API for a given bounding box.
+
+    Args:
+        bbox (str): Bounding box coordinates as a comma-separated string 
+        (e.g., "lat1,lng1,lat2,lng2").
+
+    Returns:
+        list: List of air quality measurement records from the API.
+
+    Raises:
+        ValueError: If required environment variables (API key or URL) are missing.
+        requests.RequestException: If the API request fails.
+
+    Environment Variables:
+        - AIRNOW_API_KEY: API key for AirNow API access
+        - AIRNOW_DATA_URL: Base URL for AirNow data API
+    """
+    api_key = os.getenv("AIRNOW_API_KEY", "")
+    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
+
+    if api_key == "":
+        raise ValueError("Missing API key")
+    if airnow_url == "":
+        raise ValueError("Missing airnow url")
+
+    params = {
+        "parameters": constants.POLLUTANTS,
+        "BBOX": bbox,
+        "dataType": "A",
+        "format": "application/json",
+        "verbose": 1,
+        "API_KEY": api_key,
+    }
+    return requests.get(airnow_url, params=params, timeout=300).json()
+
 
 def publish_raw_historical_records(records):
     """
