@@ -33,10 +33,10 @@ def consume_data(kafka_topic: str):
         - DOCKER_ENV: Determines whether to use Docker or local environment settings
         - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
         - RAW_HISTORIC_DATA_KAFKA_TOPIC: Kafka topic to consume from
-        - DOCKER_MINIO_ENDPOINT / LOCAL_MINIO_ENDPOINT: MinIO endpoint URL
-        - MINIO_ROOT_USER: MinIO access key
-        - MINIO_ROOT_PASSWORD: MinIO secret key
-        - STREAMFLOW_BUCKET: MinIO bucket name
+        - AWS_ENDPOINT: Amazon S3 bucket endpoint URL
+        - AWS_USER: AWS access key
+        - AWS_PASSWORD: AWS secret key
+        - STREAMFLOW_BUCKET: S3 bucket name
 
     Raises:
         Exception: If Kafka consumer setup or MinIO operations fail.
@@ -67,16 +67,11 @@ def consume_data(kafka_topic: str):
     # -----------------------------
     # Setup MinIO client
     # -----------------------------
-    endpoint = (
-        os.getenv("DOCKER_MINIO_ENDPOINT")
-        if docker_env == "1"
-        else os.getenv("LOCAL_MINIO_ENDPOINT")
-    )
     s3_client = boto3.client(
         "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-        aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        aws_access_key_id=os.getenv("AWS_USER"),
+        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+        region_name="us-east-1"
     )
 
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")

@@ -7,8 +7,6 @@ and publish it to a Kafka topic for downstream processing.
 
 import os
 import json
-import re
-from typing import List
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import requests
@@ -23,11 +21,11 @@ docker_env = os.getenv("DOCKER_ENV")
 
 def get_oldest_record_date():
     """
-    Checks MinIO bucket for the oldest date available in the data warehouse.
+    Checks S3 bucket for the oldest date available in the data warehouse.
 
     Args:
-        bucket_name (str): Name of the MinIO bucket containing historical data.
-        progress_key (str): Key for streamflow metadata json file (default: 'backfill_progress.json').
+        bucket_name (str): Name of the S3 bucket containing historical data.
+        prefix (str): Path prefix to look for (default: 'landing/airnow/').
         s3_client (boto3.client, optional): Preconfigured boto3 S3 client.
 
     Returns:
@@ -35,16 +33,19 @@ def get_oldest_record_date():
     """
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    endpoint = (
-        os.getenv("DOCKER_MINIO_ENDPOINT")
-        if docker_env == "1"
-        else os.getenv("LOCAL_MINIO_ENDPOINT")
-    )
+    # for use with MinIO
+
+    # endpoint = (
+    #     os.getenv("DOCKER_MINIO_ENDPOINT")
+    #     if docker_env == "1"
+    #     else os.getenv("LOCAL_MINIO_ENDPOINT")
+    # )
+
     s3_client = boto3.client(
         "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-        aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        aws_access_key_id=os.getenv("AWS_USER"),
+        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+        region_name="us-east-1",
     )
     try:
         progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
@@ -53,7 +54,6 @@ def get_oldest_record_date():
                 Bucket=streamflow_bucket,
                 Key=progress_key
             )
-
             data = json.loads(response["Body"].read())
             return datetime.strptime(data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT)
         else:
