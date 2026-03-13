@@ -60,7 +60,6 @@ def bronze_to_silver():
     # Drop unnecessary columns: FullAQSCode, UTC, ingested_at
     clean_df = clean_df.drop("FullAQSCode")
     clean_df = clean_df.drop("UTC")
-    clean_df = clean_df.drop("ingested_at")
     # Create a composite key for deduplication using date, hour, IntlAQSCode, and Parameter
     clean_df = clean_df.withColumn("composite_key",
                                    F.concat_ws("_", F.col("date"), F.col("hour"), F.col("IntlAQSCode"), F.col("Parameter")))
