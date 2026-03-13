@@ -180,7 +180,7 @@ def publish_raw_historical_records(records):
     )
     kafka_topic = os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC")
     for record in records:
-        record["ingested_at"] = datetime.now().isoformat()
+        # record["ingested_at"] = datetime.now().isoformat()
         message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
         producer.send(
             kafka_topic,
@@ -238,9 +238,11 @@ def main():
     and publishes to Kafka. This is primarily for testing and development.
     """
     start, end = get_times()
-
+    i = 0
     for bbox in constants.BBOXES:
         try:
+            if i == 5:
+                break
             records = fetch_month_data(start, end, bbox)
             publish_raw_historical_records(records)
         except Exception as e:
