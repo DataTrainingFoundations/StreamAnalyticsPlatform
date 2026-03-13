@@ -1,13 +1,14 @@
 """
-Producer for Raw Historical Data Kafka Topic
+Helper Functions and Kafka Producers for Raw AirNow Data
 
-This module provides functionality to fetch historical air quality data from the AirNow API
+This module provides functionality to fetch air quality data from the AirNow API
 and publish it to a Kafka topic for downstream processing.
 """
 
 import os
 import json
 import re
+from typing import List
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import requests
@@ -20,59 +21,49 @@ load_dotenv()
 
 docker_env = os.getenv("DOCKER_ENV")
 
-def get_oldest_record_date(bucket_name=None, prefix="landing/airnow/", s3_client=None):
+def get_oldest_record_date():
     """
     Checks MinIO bucket for the oldest date available in the data warehouse.
 
     Args:
         bucket_name (str): Name of the MinIO bucket containing historical data.
-        prefix (str): Path prefix to look for (default: 'landing/airnow/').
+        progress_key (str): Key for streamflow metadata json file (default: 'backfill_progress.json').
         s3_client (boto3.client, optional): Preconfigured boto3 S3 client.
 
     Returns:
         datetime or None: Oldest date found, or None if bucket is empty.
     """
-    if bucket_name is None:
-        bucket_name = os.getenv("STREAMFLOW_BUCKET")
+    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    if s3_client is None:
-        endpoint = (
-            os.getenv("DOCKER_MINIO_ENDPOINT")
-            if docker_env == "1"
-            else os.getenv("LOCAL_MINIO_ENDPOINT")
-        )
-        s3_client = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+    endpoint = (
+        os.getenv("DOCKER_MINIO_ENDPOINT")
+        if docker_env == "1"
+        else os.getenv("LOCAL_MINIO_ENDPOINT")
+    )
+    s3_client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+        aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+    )
+    try:
+        progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
+        if progress_key:
+            response = s3_client.get_object(
+                Bucket=streamflow_bucket,
+                Key=progress_key
+            )
 
-    # Create bucket, if nonexistent
-    existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
-    if bucket_name not in existing_buckets:
-        s3_client.create_bucket(Bucket=bucket_name)
-        print(f"Created bucket: {bucket_name}")
-
-    # List all objects under the prefix
-    paginator = s3_client.get_paginator("list_objects_v2")
-    dates = []
-
-    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            # Match dt=YYYY-MM-DD pattern in key
-            match = re.search(r"dt=(\d{4}-\d{2}-\d{2})", obj["Key"])
-            if match:
-                dt_str = match.group(1)
-                dt_obj = datetime.strptime(dt_str, "%Y-%m-%d")
-                dates.append(dt_obj)
-
-    if dates:
-        return min(dates)
-    else:
+            data = json.loads(response["Body"].read())
+            return datetime.strptime(data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT)
+        else:
+            raise ValueError("Missing streamflow bucket progress key value")
+    except s3_client.exceptions.NoSuckKey:
         return None  # No data found
+    except ValueError as e:
+        raise RuntimeError("Unable get oldest date from warehouse") from e
 
-def get_times(oldest_date_time=None):
+def get_times(oldest_date_time: datetime | None = None):
     """
     Returns start and end datetimes (as strings) for fetching a full month of historical data.
 
@@ -104,8 +95,8 @@ def get_times(oldest_date_time=None):
         start_dt = oldest.replace(day=1) - relativedelta(months=1)
         end_dt = oldest.replace(day=1, hour=23) - timedelta(days=1)
 
-    start_str = start_dt.strftime("%Y-%m-%dT%H")
-    end_str = end_dt.strftime("%Y-%m-%dT%H")
+    start_str = start_dt.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
+    end_str = end_dt.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
     return start_str, end_str
 
 
@@ -151,7 +142,7 @@ def fetch_month_data(start, end, bbox):
     return requests.get(airnow_url, params=params, timeout=300).json()
 
 
-def publish_raw_historical_records(records):
+def publish_raw_historical_records(records: list, kafka_topic: str):
     """
     Publishes raw historical records to the corresponding Kafka topic.
 
@@ -169,6 +160,9 @@ def publish_raw_historical_records(records):
     Raises:
         kafka.KafkaError: If publishing to Kafka fails.
     """
+    if not kafka_topic:
+        raise ValueError("Missing kafka_topic parameter")
+
     bootstrap_server = (
         os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
         if docker_env == "1"
@@ -178,7 +172,6 @@ def publish_raw_historical_records(records):
         bootstrap_servers=bootstrap_server,
         value_serializer=lambda v: json.dumps(v).encode(),
     )
-    kafka_topic = os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC")
     for record in records:
         # record["ingested_at"] = datetime.now().isoformat()
         message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
@@ -192,7 +185,7 @@ def publish_raw_historical_records(records):
     print("Batch sent.")
 
 
-def main():
+def run_historic_producer():
     """
     Main function for running the producer locally.
 
@@ -206,11 +199,26 @@ def main():
             if i == 5:
                 break
             records = fetch_month_data(start, end, bbox)
-            publish_raw_historical_records(records)
+            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
 
 
 if __name__ == "__main__":
-    main()
+    while True:
+        choice = input(
+            """
+            \n\nSelect which producer to run:
+                '1': Historic
+                '2': Current\n\n 
+            """
+        )
+        match choice:
+            case "1":
+                run_historic_producer()
+            case "2":
+                # current producer function call goes here
+                pass
+            case _:
+                print("Invalid input. Please choose from the options below:")

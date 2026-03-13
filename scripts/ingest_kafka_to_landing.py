@@ -10,6 +10,7 @@ import json
 import time
 import os
 import uuid
+from datetime import datetime
 from collections import defaultdict
 import boto3
 from kafka import KafkaConsumer
@@ -18,7 +19,7 @@ from util import constants
 
 load_dotenv()
 
-def consume_historical_data():
+def consume_data(kafka_topic: str):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
 
@@ -40,6 +41,9 @@ def consume_historical_data():
     Raises:
         Exception: If Kafka consumer setup or MinIO operations fail.
     """
+    if not kafka_topic:
+        raise ValueError("Missing kafka topic parameter")
+
     docker_env = os.getenv("DOCKER_ENV")
 
     # -----------------------------
@@ -52,7 +56,7 @@ def consume_historical_data():
     )
 
     consumer = KafkaConsumer(
-        os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC"),
+        kafka_topic,
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
         group_id="minio_writer_group",
@@ -88,7 +92,7 @@ def consume_historical_data():
     # -----------------------------
     last_message_time = time.time()
     print("Starting Kafka consumption...")
-
+    oldest_date_ingested = datetime.now()
     while True:
         records = consumer.poll(timeout_ms=1000)
 
@@ -109,6 +113,10 @@ def consume_historical_data():
         # -----------------------------
         date_partitions = defaultdict(lambda: defaultdict(list))
         for record in messages:
+            oldest_date_ingested = min(
+                oldest_date_ingested,
+                datetime.strptime(record["UTC"], constants.AIRNOW_UTC_DATE_FORMAT)
+            )
             date, hour = record["UTC"].split("T")
             hour = hour[:2]  # Keep only hour and drop minutes
             date_partitions[date][hour].append(record)
@@ -127,8 +135,40 @@ def consume_historical_data():
                 )
             print(f"Wrote {len(hour_partitions)} records to {date_partition}")
 
+    # Update streamflow metadata file with new oldest_date
+    body = json.dumps({
+        "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
+    })
+
+    progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
+    if progress_key:
+        s3_client.put_object(
+            Bucket=streamflow_bucket,
+            Key=progress_key,
+            Body=body
+        )
+    else:
+        raise ValueError("Missing streamflow bucket progress key value")
+
     consumer.close()
     print("Kafka ingestion complete.")
 
 if __name__ == "__main__":
-    consume_historical_data()
+    while True:
+        choice = input(
+            """
+            \n\nSelect which consumer to run:
+                '1': Historic
+                '2': Current\n\n 
+            """
+        )
+        match choice:
+            case "1":
+                consume_data(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+                break
+            case "2":
+                topic = os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")
+                # current consumer function call goes here
+                break
+            case _:
+                print("Invalid input. Please choose from the options below:")
