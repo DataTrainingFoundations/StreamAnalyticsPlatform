@@ -191,13 +191,11 @@ def publish_raw_historical_records(records):
     producer.flush()
     print("Batch sent.")
 
-def fetch_month_data(start, end, bbox):
+def fetch_current_data(bbox):
     """
-    Fetches historical air quality data from the AirNow API for a given time range and bounding box.
+    Fetches current hour of air quality data from the AirNow API for a given bounding box.
 
     Args:
-        start (str): Start date/time in "YYYY-MM-DDTHH" format.
-        end (str): End date/time in "YYYY-MM-DDTHH" format.
         bbox (str): Bounding box coordinates as a comma-separated string 
         (e.g., "lat1,lng1,lat2,lng2").
 
@@ -221,8 +219,6 @@ def fetch_month_data(start, end, bbox):
         raise ValueError("Missing airnow url")
 
     params = {
-        "startDate": start,
-        "endDate": end,
         "parameters": constants.POLLUTANTS,
         "BBOX": bbox,
         "dataType": "A",
@@ -232,46 +228,6 @@ def fetch_month_data(start, end, bbox):
     }
     return requests.get(airnow_url, params=params, timeout=300).json()
 
-
-def publish_raw_historical_records(records):
-    """
-    Publishes raw historical records to the corresponding Kafka topic.
-
-    Each record is enriched with an ingestion timestamp and published with a key
-    based on the AQS code and parameter for proper partitioning.
-
-    Args:
-        records (list): List of air quality measurement records to publish.
-
-    Environment Variables:
-        - DOCKER_ENV: Determines whether to use Docker or local Kafka settings
-        - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
-        - RAW_HISTORICAL_DATA_KAFKA_TOPIC: Target Kafka topic name
-
-    Raises:
-        kafka.KafkaError: If publishing to Kafka fails.
-    """
-    bootstrap_server = (
-        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
-        if docker_env == "1"
-        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
-    )
-    producer = KafkaProducer(
-        bootstrap_servers=bootstrap_server,
-        value_serializer=lambda v: json.dumps(v).encode(),
-    )
-    kafka_topic = os.getenv("RAW_HISTORICAL_DATA_KAFKA_TOPIC")
-    for record in records:
-        record["ingested_at"] = datetime.now().isoformat()
-        message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
-        producer.send(
-            kafka_topic,
-            key=message_key.encode(),
-            value=record,
-        )
-
-    producer.flush()
-    print("Batch sent.")
 
 
 def main():
