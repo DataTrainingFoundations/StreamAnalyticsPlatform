@@ -47,6 +47,7 @@ def bronze_to_silver():
     # Read Parquet data from the bronze layer
     clean_df = spark.read.parquet("s3a://stream-analytics-project-bucket/bronze/airnow")
     # Add a new column 'concern_level' based on the 'Category' value
+    clean_df = clean_df.filter(F.col("AQI") != -999)
     clean_df = clean_df.withColumn("concern_level", \
                                 F.when(clean_df.Category == 1, "Good")
                                 .when(clean_df.Category == 2, "Moderate")
