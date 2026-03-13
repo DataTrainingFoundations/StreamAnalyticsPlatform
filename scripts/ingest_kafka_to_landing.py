@@ -117,6 +117,7 @@ def consume_historical_data():
         # Write files per date/hour
         # -----------------------------
         for date, hour_partitions in date_partitions.items():
+            date_partition = f"landing/airnow/date={date}"
             for hour, records in hour_partitions.items():
                 key = f"landing/airnow/date={date}/hour={hour}/{uuid.uuid4()}.json"
                 s3_client.put_object(
@@ -124,7 +125,7 @@ def consume_historical_data():
                     Key=key,
                     Body="\n".join(json.dumps(r) for r in records).encode(),
                 )
-                print(f"Wrote {len(records)} records to {key}")
+            print(f"Wrote {len(hour_partitions)} records to {date_partition}")
 
     consumer.close()
     print("Kafka ingestion complete.")
