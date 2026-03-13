@@ -9,7 +9,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from util import constants
 from scripts.airnow_raw_producers import (
-    fetch_cur_data,
+    fetch_current_data,
     publish_raw_historical_records
 )
 from scripts.ingest_kafka_to_landing import (
@@ -46,13 +46,12 @@ def produce_historical_data():
     Raises:
         Exception: If data fetching or publishing fails for any bounding box.
     """
-    start, end = get_times()
     i = 0
-    for bbox in constants.BBOXES:
+    for bbox in constants.CURR_BBOXES:
         try:
             if i == 5:
                 break
-            records = fetch_month_data(start, end, bbox)
+            records = fetch_current_data(bbox)
             publish_raw_historical_records(records)
             print(f"✓ Published {len(records)} records to Kafka")
             i += 1
