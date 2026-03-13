@@ -4,9 +4,7 @@ import numpy as np
 import plotly.express as px
 
 
-#Streamlit app for displaying AirNow analysis
-
-
+# Streamlit app for displaying AirNow analysis
 st.set_page_config(page_title="Air Quality Dashboard", layout="wide")
 st.title("Air Quality Dashboard")
 
@@ -25,6 +23,12 @@ for col in numeric_cols:
     df[col] = df[col].replace(-999, np.nan)
 
 # --------------------------------------------------
+# 🔥 Derived time fields (needed for heatmaps)
+# --------------------------------------------------
+df["hour"] = df["UTC"].dt.hour
+df["date"] = df["UTC"].dt.date
+
+# --------------------------------------------------
 # Axis schema (based on your real JSON)
 # --------------------------------------------------
 AXIS_OPTIONS = {
@@ -36,6 +40,10 @@ AXIS_OPTIONS = {
     ],
     "temporal": [
         "UTC"
+    ],
+    "temporal_extended": [
+        "hour",
+        "date"
     ],
     "categorical": [
         "Category",
@@ -79,6 +87,11 @@ CHART_AXIS_TYPES = {
     "Pollution Map": {
         "x": ["numeric"],
         "y": []
+    },
+    # 🔥 Heatmap added
+    "Heatmap": {
+        "x": ["temporal_extended", "categorical"],
+        "y": ["temporal_extended", "categorical"]
     }
 }
 
@@ -95,7 +108,7 @@ chart_type = st.sidebar.selectbox(
 def allowed_columns(axis_type_list):
     cols = []
     for axis_type in axis_type_list:
-        cols.extend(AXIS_OPTIONS[axis_type])
+        cols.extend(AXIS_OPTIONS.get(axis_type, []))
     return cols
 
 # Filter axis options based on chart type
@@ -109,19 +122,27 @@ if y_options:
     y_axis = st.sidebar.selectbox("Y-axis", y_options)
 
 # --------------------------------------------------
-# Plotting (no invalid states possible)
+# Plotting
 # --------------------------------------------------
 df_plot = df.copy()
 
-# Drop rows with missing Y values when Y is required
 if y_axis:
     df_plot = df_plot.dropna(subset=[y_axis])
 
 st.subheader(f"{chart_type} Chart")
 
+# ---------------- Line ----------------
 if chart_type == "Line":
+
     agg_options = ["Average", "Max"]
     df_agg = st.sidebar.selectbox("Aggregation Options", agg_options)
+    
+    regions = ["All"] + sorted(df_plot["SiteName"].dropna().unique().tolist())
+    selected_region = st.sidebar.selectbox("Select Region", regions)
+
+    if selected_region != "All":
+        df_plot = df_plot[df_plot["SiteName"] == selected_region]
+        
     if df_agg == "Average":
         df_line = (
             df_plot
@@ -130,7 +151,7 @@ if chart_type == "Line":
             .mean()
             .sort_values("UTC")
         )
-    elif df_agg == "Max":
+    else:
         df_line = (
             df_plot
             .dropna(subset=["AQI"])
@@ -138,8 +159,10 @@ if chart_type == "Line":
             .max()
             .sort_values("UTC")
         )
+
     st.line_chart(df_line.set_index(x_axis)[y_axis])
 
+# ---------------- Scatter ----------------
 elif chart_type == "Scatter":
     fig = px.scatter(
         df_plot,
@@ -149,6 +172,7 @@ elif chart_type == "Scatter":
     )
     st.plotly_chart(fig, use_container_width=True)
 
+# ---------------- Bar ----------------
 elif chart_type == "Bar":
     agg = (
         df_plot
@@ -157,6 +181,7 @@ elif chart_type == "Bar":
     )
     st.bar_chart(agg.set_index(x_axis))
 
+# ---------------- Box ----------------
 elif chart_type == "Box":
     fig = px.box(
         df_plot,
@@ -166,54 +191,93 @@ elif chart_type == "Box":
     )
     st.plotly_chart(fig, use_container_width=True)
 
+# ---------------- Histogram ----------------
 elif chart_type == "Histogram":
-    fig = px.histogram(
-        df_plot,
-        x=x_axis
+    fig = px.histogram(df_plot, x=x_axis)
+    st.plotly_chart(fig, use_container_width=True)
+
+# ---------------- Pie ----------------
+elif chart_type == "Pie":
+    counts = df_plot[x_axis].value_counts().reset_index()
+    counts.columns = [x_axis, "Count"]
+
+    fig = px.pie(
+        counts,
+        names=x_axis,
+        values="Count",
+        title=f"{x_axis} Distribution"
     )
     st.plotly_chart(fig, use_container_width=True)
-    
-elif chart_type == "Pie":
-    if x_axis in df_plot.columns:
-        counts = df_plot[x_axis].value_counts().reset_index()
-        counts.columns = [x_axis, "Count"]
-        fig_pie = px.pie(
-            counts,
-            names=x_axis,
-            values="Count",
-            title=f"{x_axis} Distribution",
-            color=x_axis,
-            color_discrete_sequence=px.colors.qualitative.Set3
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-    else:
-        st.write(f"No column '{x_axis}' found in the data.")
 
+# ---------------- Pollution Map ----------------
 elif chart_type == "Pollution Map":
-    if {"Latitude", "Longitude", "AQI"}.issubset(df_plot.columns):
-        df_map = df_plot.dropna(subset=["Latitude", "Longitude", "AQI"])
-        
-        fig_map = px.scatter_mapbox(
-            df_map,
-            lat="Latitude",
-            lon="Longitude",
-            color="AQI",
-            size="AQI",
-            color_continuous_scale=px.colors.sequential.OrRd,
-            size_max=15,
-            zoom=3,
-            hover_name="SiteName" if "SiteName" in df_map.columns else None,
-            hover_data={"Latitude": True, "Longitude": True, "AQI": True}
-        )
+    if "UTC" in df_plot.columns:
+        df_plot["UTC"] = pd.to_datetime(df_plot["UTC"])
+        df_plot["Date"] = df_plot["UTC"].dt.date      # Extract date
+        df_plot["Hour"] = df_plot["UTC"].dt.hour      # Extract hour
+    # Date slider
+    min_date = df_plot["Date"].min()
+    max_date = df_plot["Date"].max()
+    selected_date = st.sidebar.date_input(
+        "Select Date",
+        value=min_date,
+        min_value=min_date,
+        max_value=max_date
+    )
 
-        fig_map.update_layout(mapbox_style="open-street-map")
-        fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-        
-        st.plotly_chart(fig_map, use_container_width=True)
-    else:
-        st.write("Latitude, Longitude, or AQI column missing.")
+    # Hour slider (0–23)
+    selected_hour = st.sidebar.slider(
+        "Select Hour of Day (0–23 UTC)",
+        min_value=0,
+        max_value=23,
+        value=0
+    )
+
+    # Filter dataframe by both date and hour
+    df_plot_filtered = df_plot[
+        (df_plot["Date"] == selected_date) &
+        (df_plot["Hour"] == selected_hour)
+    ]
+
+    df_map = df_plot_filtered.dropna(subset=["Latitude", "Longitude", "AQI"])
+
+    fig_map = px.scatter_mapbox(
+        df_map,
+        lat="Latitude",
+        lon="Longitude",
+        color="AQI",
+        size="AQI",
+        color_continuous_scale="OrRd",
+        size_max=15,
+        zoom=3,
+        hover_name="SiteName"
+    )
+
+    fig_map.update_layout(mapbox_style="open-street-map")
+    fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+    st.plotly_chart(fig_map, use_container_width=True)
+
+# ---------------- 🔥 Heatmap ----------------
+elif chart_type == "Heatmap":
+    heat_df = (
+        df_plot
+        .dropna(subset=["AQI"])
+        .groupby([x_axis, y_axis], as_index=False)["AQI"]
+        .mean()
+    )
+
+    fig = px.density_heatmap(
+        heat_df,
+        x=x_axis,
+        y=y_axis,
+        z="AQI",
+        color_continuous_scale="Viridis"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
 # --------------------------------------------------
-# Optional: Data preview
+# Data preview
 # --------------------------------------------------
 with st.expander("Show raw data"):
     st.dataframe(df)
