@@ -152,7 +152,6 @@ elif chart_type == "Pie":
 elif chart_type == "Pollution Map":
     min_date = df_plot["date"].min().date()
     max_date = df_plot["date"].max().date()
-    st.write(min_date)
     selected_date = st.sidebar.date_input(
         "Date",
         value=min_date,
