@@ -176,6 +176,35 @@ elif chart_type == "Pollution Map":
     df_map = df_plot[
         (df_plot["date"].dt.date == selected_date) &
         (df_plot["hour"] == selected_hour)
+    ].groupby(
+        ["sitename", "latitude", "longitude"],
+        as_index=False
+    )["aqi"].mean()
+
+    aqi_colorscale = [
+        # Good (0–50)
+        [0.00, "green"],
+        [0.10, "green"],
+
+        # Moderate (51–100)
+        [0.10, "yellow"],
+        [0.20, "yellow"],
+
+        # Unhealthy for Sensitive Groups (101–150)
+        [0.20, "orange"],
+        [0.30, "orange"],
+
+        # Unhealthy (151–200)
+        [0.30, "red"],
+        [0.40, "red"],
+
+        # Very Unhealthy (201–300)
+        [0.40, "purple"],
+        [0.60, "purple"],
+
+        # Hazardous (301–higher)
+        [0.60, "maroon"],
+        [1.00, "maroon"]
     ]
 
     fig = px.scatter_mapbox(
@@ -186,7 +215,27 @@ elif chart_type == "Pollution Map":
         size="aqi",
         zoom=4,
         hover_name="sitename",
-        color_continuous_scale="OrRd"
+        color_continuous_scale=aqi_colorscale
+    )
+
+    fig.update_layout(
+        coloraxis=dict(
+            cmin=0,
+            cmax=500,
+            colorbar=dict(
+                title="AQI",
+                tickvals=[0, 51, 101, 151, 201, 301, 500],
+                ticktext=[
+                    "0 Good",
+                    "51 Moderate",
+                    "101 Unhealthy for Sensitive Groups",
+                    "151 Unhealthy",
+                    "201 Very Unhealthy",
+                    "301 Hazardous",
+                    "500 Hazardous"
+                ]
+            )
+        )
     )
 
     fig.update_layout(mapbox_style="open-street-map")
