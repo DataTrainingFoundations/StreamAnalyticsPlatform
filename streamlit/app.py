@@ -98,7 +98,13 @@ if chart_type == "Line":
         .mean()
         .sort_values("date")
     )
-    st.line_chart(df_line.set_index("date"))
+    fig = px.line(
+        df_line,
+        x=x_axis,
+        y=y_axis,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
 # Scatter
@@ -121,7 +127,13 @@ elif chart_type == "Bar":
         .groupby(x_axis, as_index=False)["aqi"]
         .mean()
     )
-    st.bar_chart(agg.set_index(x_axis))
+    fig = px.bar(
+        df_plot,
+        x=x_axis,
+        y=y_axis,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
 # Box
