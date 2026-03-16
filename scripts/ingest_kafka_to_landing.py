@@ -79,7 +79,7 @@ def consume_data(kafka_topic: str):
         if dev != "1"
         else boto3.client(
             "s3",
-            endpoint=(
+            endpoint_url=(
                 os.getenv("DOCKER_MINIO_ENDPOINT")
                 if docker_env == "1"
                 else os.getenv("LOCAL_MINIO_ENDPOINT")
@@ -101,26 +101,35 @@ def consume_data(kafka_topic: str):
     # Start consuming messages
     # -----------------------------
     last_message_time = time.time()
-    print("Starting Kafka consumption...")
+    if dev == "1":
+        print("Starting Kafka consumption...")
     oldest_date_ingested = datetime.now()
     while True:
+        if dev == "1":
+            print("Getting records from Kafka topic")
         records = consumer.poll(timeout_ms=1000)
+
 
         if not records:
             # Exit if no messages arrive for a while
             if time.time() - last_message_time > constants.MAX_KAFKA_CONSUMER_IDLE_TIME:
-                print("No new messages detected. Exiting consumer.")
+                if dev == "1":
+                    print("No new messages detected. Exiting consumer.")
                 break
             continue
 
         last_message_time = time.time()
 
         # Flatten polled messages
+        if dev == "1":
+            print("Flattening polled messages from Kafka")
         messages = [msg.value for msgs in records.values() for msg in msgs]
 
         # -----------------------------
-        # Group by date/hour partitions
+        # Group by date/hour partitions"
         # -----------------------------
+        if dev == "1":
+            print("Creating partitions for bucket insert")
         date_partitions = defaultdict(lambda: defaultdict(list))
         for record in messages:
             oldest_date_ingested = min(
@@ -143,15 +152,19 @@ def consume_data(kafka_topic: str):
                     Key=key,
                     Body="\n".join(json.dumps(r) for r in records).encode(),
                 )
-            print(f"Wrote {len(hour_partitions)} records to {date_partition}")
+            if dev == "1":
+                print(f"Wrote {len(hour_partitions)} records to {date_partition}")
 
     # Update streamflow metadata file with new oldest_date
     body = json.dumps({
-        "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
+        "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT),
+        "ingested_at": datetime.now().isoformat()
     })
 
     progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
     if progress_key:
+        if dev == "1":
+            print("Creating/Updating streamflow metadata json file in s3 bucket")
         s3_client.put_object(
             Bucket=streamflow_bucket,
             Key=progress_key,
@@ -161,7 +174,8 @@ def consume_data(kafka_topic: str):
         raise ValueError("Missing streamflow bucket progress key value")
 
     consumer.close()
-    print("Kafka ingestion complete.")
+    if dev == "1":
+        print("Kafka ingestion complete.")
 
 if __name__ == "__main__":
     while True:

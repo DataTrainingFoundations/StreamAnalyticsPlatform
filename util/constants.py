@@ -6,7 +6,7 @@ POLLUTANTS = "PM25,PM10,OZONE,NO2,CO,SO2"
 
 MAX_KAFKA_CONSUMER_IDLE_TIME = 30  # seconds before exiting kafka consumer task
 
-AIRNOW_UTC_DATE_FORMAT = "%Y-%m-%dT%H"
+AIRNOW_UTC_DATE_FORMAT = "%Y-%m-%dT%H:%M"
 
 TARGET_DATE = "2019-09-01"
 

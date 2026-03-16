@@ -44,7 +44,7 @@ def get_oldest_record_date():
         if dev != "1"
         else boto3.client(
             "s3",
-            endpoint=(
+            endpoint_url=(
                 os.getenv("DOCKER_MINIO_ENDPOINT")
                 if docker_env == "1"
                 else os.getenv("LOCAL_MINIO_ENDPOINT")
@@ -62,10 +62,18 @@ def get_oldest_record_date():
                 Key=progress_key
             )
             data = json.loads(response["Body"].read())
+            if dev == "1":
+                print("Returning oldest date from db")
             return datetime.strptime(data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT)
         else:
             raise ValueError("Missing streamflow bucket progress key value")
-    except s3_client.exceptions.NoSuckKey:
+    except s3_client.exceptions.NoSuchKey:
+        if dev == "1":
+            print("Returning None")
+        return None  # No data found
+    except s3_client.exceptions.NoSuchBucket:
+        if dev == "1":
+            print("Returning None")
         return None  # No data found
     except ValueError as e:
         raise RuntimeError("Unable get oldest date from warehouse") from e
@@ -96,11 +104,15 @@ def get_times(oldest_date_time: datetime | None = None):
         end_dt = today.replace(
             day=1, hour=23, minute=0, second=0, microsecond=0
         ) - timedelta(days=1)
+        if dev == "1":
+            print("Using default dates")
     else:
         # Compute full month before oldest_date_time
         oldest = oldest_date_time.replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = oldest.replace(day=1) - relativedelta(months=1)
         end_dt = oldest.replace(day=1, hour=23) - timedelta(days=1)
+        if dev == "1":
+            print("Using calculated dates based on oldest time")
 
     start_str = start_dt.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
     end_str = end_dt.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
@@ -146,6 +158,8 @@ def fetch_month_data(start, end, bbox):
         "verbose": 1,
         "API_KEY": api_key,
     }
+    if dev == "1":
+        print("Returning fetched airnow data")
     return requests.get(airnow_url, params=params, timeout=300).json()
 
 
@@ -189,7 +203,8 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
         )
 
     producer.flush()
-    print("Batch sent.")
+    if dev == "1":
+        print("Batch sent.")
 
 
 def run_historic_producer():
@@ -225,8 +240,9 @@ if __name__ == "__main__":
         match choice:
             case "1":
                 run_historic_producer()
+                break
             case "2":
                 # current producer function call goes here
-                pass
+                break
             case _:
                 print("Invalid input. Please choose from the options below:")
