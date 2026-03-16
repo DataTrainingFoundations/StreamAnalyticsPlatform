@@ -23,7 +23,7 @@ df = pd.read_parquet(
         "secret": os.getenv("AWS_PASSWORD")
     }
 )
-df["date"] = pd.to_datetime(df["date"].astype(str))
+df["date"] = pd.to_datetime(df["date"].astype(str)) + pd.to_timedelta(df["hour"], unit="h")
 # --------------------------------------------------
 # Clean AQI (-999 → NaN)
 # --------------------------------------------------
