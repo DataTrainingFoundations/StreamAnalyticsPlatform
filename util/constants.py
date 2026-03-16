@@ -8,7 +8,7 @@ MAX_KAFKA_CONSUMER_IDLE_TIME = 30  # seconds before exiting kafka consumer task
 
 AIRNOW_UTC_DATE_FORMAT = "%Y-%m-%dT%H:%M"
 
-TARGET_DATE = "2019-09-01"
+TARGET_DATE = "2019-09-01T00:00"
 
 SPARK_APP_NAME="AirNowStreamAnalytics"
 

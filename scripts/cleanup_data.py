@@ -17,7 +17,7 @@ def move_processed_data(source_prefix, dest_prefix):
     Move all objects from one prefix to another using batch deletes.
     Works with S3 and MinIO.
     """
-    s3 = (
+    s3_client = (
         boto3.client(
             "s3",
             aws_access_key_id=os.getenv("AWS_USER"),
@@ -27,7 +27,7 @@ def move_processed_data(source_prefix, dest_prefix):
         if dev != "1"
         else boto3.client(
             "s3",
-            endpoint=(
+            endpoint_url=(
                 os.getenv("DOCKER_MINIO_ENDPOINT")
                 if docker_env == "1"
                 else os.getenv("LOCAL_MINIO_ENDPOINT")
@@ -39,7 +39,7 @@ def move_processed_data(source_prefix, dest_prefix):
 
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    paginator = s3.get_paginator("list_objects_v2")
+    paginator = s3_client.get_paginator("list_objects_v2")
     objects_to_delete = []
 
     for page in paginator.paginate(Bucket=streamflow_bucket, Prefix=source_prefix):
@@ -52,7 +52,7 @@ def move_processed_data(source_prefix, dest_prefix):
             dest_key = source_key.replace(source_prefix, dest_prefix, 1)
 
             # Copy object
-            s3.copy_object(
+            s3_client.copy_object(
                 Bucket=streamflow_bucket,
                 CopySource={"Bucket": streamflow_bucket, "Key": source_key},
                 Key=dest_key
@@ -63,7 +63,7 @@ def move_processed_data(source_prefix, dest_prefix):
 
             # Delete in batches of 1000
             if len(objects_to_delete) == 1000:
-                s3.delete_objects(
+                s3_client.delete_objects(
                     Bucket=streamflow_bucket,
                     Delete={"Objects": objects_to_delete}
                 )
@@ -71,9 +71,14 @@ def move_processed_data(source_prefix, dest_prefix):
 
     # Delete remaining objects
     if objects_to_delete:
-        s3.delete_objects(
+        s3_client.delete_objects(
             Bucket=streamflow_bucket,
             Delete={"Objects": objects_to_delete}
         )
 
     print("Move completed.")
+
+if __name__ == "__main__":
+    archive_prefix = os.getenv("STREAMFLOW_BUCKET_ARCHIVE_PREFIX")
+    landing_prefix = os.getenv("STREAMFLOW_BUCKET_LANDING_PREFIX")
+    move_processed_data(landing_prefix, archive_prefix)

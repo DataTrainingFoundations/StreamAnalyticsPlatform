@@ -42,10 +42,6 @@ def create_spark_session(
         SparkSession.builder
         .appName(app_name) # type: ignore
         .master(master)
-        .config(
-            "spark.jars.packages",
-            "org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.406"
-        )
         .config("spark.hadoop.fs.s3a.endpoint", os.getenv("AWS_ENDPOINT"))
         .config("spark.hadoop.fs.s3a.access.key", os.getenv("AWS_USER"))
         .config("spark.hadoop.fs.s3a.secret.key", os.getenv("AWS_PASSWORD"))
@@ -66,7 +62,7 @@ def create_spark_session(
         .master(master)
         .config(
             "spark.jars.packages",
-            "org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.406"
+            "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
         )
         .config("spark.hadoop.fs.s3a.endpoint", os.getenv("DOCKER_MINIO_ENDPOINT")
                 if docker_env == "1"

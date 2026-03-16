@@ -57,7 +57,7 @@ def decide_ingestion(**context):
         context["ti"].xcom_push(key="oldest_date", value=oldest)
         if oldest <= datetime.strptime(constants.TARGET_DATE, constants.AIRNOW_UTC_DATE_FORMAT):
             return "stop_pipeline"
-    return "ingest_data"
+    return "produce_raw_data_to_kafka"
 
 def produce_historical_data(**context):
     """

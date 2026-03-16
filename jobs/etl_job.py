@@ -45,12 +45,12 @@ def get_partition_dates(prefix):
         )
     )
     paginator = s3_client.get_paginator("list_objects_v2")
-
     dates = set()
-
+    if dev == "1":
+        print("Starting date filtering")
     for page in paginator.paginate(Bucket=streamflow_bucket, Prefix=prefix, Delimiter="/"):
         for p in page.get("CommonPrefixes", []):
-            match = re.search(r"dt=(\d{4}-\d{2}-\d{2})", p["Prefix"])
+            match = re.search(r"date=(\d{4}-\d{2}-\d{2})", p["Prefix"])
             if match:
                 dates.add(match.group(1))
 
@@ -66,6 +66,8 @@ def raw_to_bronze():
     Raises:
         Exception: If Spark session creation or data reading/writing fails.
     """
+    if dev == "1":
+        print("\n\nRunning bronze transformation\n\n")
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read JSON data from the landing zone in S3
@@ -86,9 +88,15 @@ def bronze_to_silver():
     - Converting column names to lowercase
     - Removing duplicates
     """
+    if dev == "1":
+        print("\n\nRunning silver transformation\n\n")
     # Get new date partitions to process from bronze zone
-    bronze_dates = get_partition_dates("bronze/airnow")
+    bronze_dates = get_partition_dates("bronze/airnow/")
+    if dev == '1':
+        print("\nBronze Dates: ", len(bronze_dates))
     silver_dates = get_partition_dates("silver/airnow_clean/")
+    if dev == '1':
+        print("\nSilver Dates: ", len(silver_dates), "\n\n")
     dates_to_process = bronze_dates - silver_dates
     # Create or retrieve the Spark session
     spark = get_or_create_session()
@@ -117,7 +125,7 @@ def bronze_to_silver():
         clean_df = clean_df.withColumn(
             "composite_key",
             F.concat_ws(
-                "_", F.col("date"), F.col("hour"), F.col("IntlAQSCode"), F.col("Parameter")
+                "_", F.lit(date), F.col("hour"), F.col("IntlAQSCode"), F.col("Parameter")
             ),
         )
         # Remove duplicate records based on the composite key
@@ -126,7 +134,7 @@ def bronze_to_silver():
         clean_df = clean_df.toDF(*[c.lower() for c in clean_df.columns])
         # Write the cleaned data to the silver layer, partitioned by date
         clean_df.write.mode("append").parquet(
-            f"s3a://{streamflow_bucket}/silver/airnow_clean/dt={date}"
+            f"s3a://{streamflow_bucket}/silver/airnow_clean/date={date}"
         )
 
 def silver_to_gold():
@@ -141,16 +149,18 @@ def silver_to_gold():
 
     Currently a placeholder - shows the data for inspection.
     """
+    if dev == "1":
+        print("\n\nRunning gold transformation\n\n")
     # TODO: Implement logic to check for new dates as is done for bronze -> silver transformation
 
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read cleaned Parquet data from the silver layer
-    silver_df = spark.read.parquet(
-        "s3a://stream-analytics-project-bucket/silver/airnow_clean"
-    )
-    # Display the data for inspection (temporary)
-    silver_df.show()
+    # silver_df = spark.read.parquet(
+    #     "s3a://stream-analytics-project-bucket/silver/airnow_clean"
+    # )
+    # # Display the data for inspection (temporary)
+    # silver_df.show()
     # TODO: Implement aggregation logic to create fact and dimension tables
     # Example: Create fact table with aggregated air quality metrics
     # fact_df = silver_df.groupBy("date", "location").agg(F.avg("value").alias("avg_value"))
