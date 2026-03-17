@@ -21,7 +21,7 @@ load_dotenv()
 
 dev = os.getenv("DEV")
 
-def consume_data(kafka_topic: str):
+def consume_data(kafka_topic: str, is_historic: bool = True):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
 
@@ -155,23 +155,24 @@ def consume_data(kafka_topic: str):
             if dev == "1":
                 print(f"Wrote {len(hour_partitions)} records to {date_partition}")
 
-    # Update streamflow metadata file with new oldest_date
-    body = json.dumps({
-        "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT),
-        "ingested_at": datetime.now().isoformat()
-    })
+    if is_historic:
+        # Update streamflow metadata file with new oldest_date
+        body = json.dumps({
+            "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT),
+            "ingested_at": datetime.now().isoformat()
+        })
 
-    progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
-    if progress_key:
-        if dev == "1":
-            print("Creating/Updating streamflow metadata json file in s3 bucket")
-        s3_client.put_object(
-            Bucket=streamflow_bucket,
-            Key=progress_key,
-            Body=body
-        )
-    else:
-        raise ValueError("Missing streamflow bucket progress key value")
+        progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
+        if progress_key:
+            if dev == "1":
+                print("Creating/Updating streamflow metadata json file in s3 bucket")
+            s3_client.put_object(
+                Bucket=streamflow_bucket,
+                Key=progress_key,
+                Body=body
+            )
+        else:
+            raise ValueError("Missing streamflow bucket progress key value")
 
     consumer.close()
     if dev == "1":
