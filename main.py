@@ -8,10 +8,14 @@ def main():
     load_dotenv()
     start = input("Enter the starting date (YYYY-MM-DDTHH): ")
     end = input("Enter the ending date (YYYY-MM-DDTHH): ")
+    i = 0
     for bbox in constants.BBOXES:
         try:
+            if i == 5:
+                break
             records = airnow_raw_producers.fetch_month_data(start, end, bbox)
             airnow_raw_producers.publish_raw_historical_records(records, "kafka_raw_custom")
+            i += 1
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
