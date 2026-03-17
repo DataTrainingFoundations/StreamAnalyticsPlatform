@@ -133,7 +133,7 @@ with DAG(
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
     start_date=datetime(2024, 1, 1),
-    schedule=None,  # Manual trigger only
+    schedule="@hourly",
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
 ) as dag:
