@@ -149,22 +149,89 @@ def silver_to_gold():
 
     Currently a placeholder - shows the data for inspection.
     """
-    if dev == "1":
-        print("\n\nRunning gold transformation\n\n")
-    # TODO: Implement logic to check for new dates as is done for bronze -> silver transformation
-
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read cleaned Parquet data from the silver layer
-    # silver_df = spark.read.parquet(
-    #     "s3a://stream-analytics-project-bucket/silver/airnow_clean"
-    # )
-    # # Display the data for inspection (temporary)
-    # silver_df.show()
+    silver_df = spark.read.parquet("s3a://stream-analytics-project-bucket/silver/airnow_clean")
+    # Display the data for inspection (temporary)
+    #silver_df.show()
     # TODO: Implement aggregation logic to create fact and dimension tables
-    # Example: Create fact table with aggregated air quality metrics
-    # fact_df = silver_df.groupBy("date", "location").agg(F.avg("value").alias("avg_value"))
-    # fact_df.write.mode("overwrite").parquet("s3a://stream-analytics-project-bucket/gold/air_quality_fact/")
+    #create table for monitoring sites
+    dim_site = silver_df.select(
+        "intlaqscode",
+        "sitename",
+        "agencyname",
+        "latitude",
+        "longitude"
+    ).distinct() \
+     .withColumn("site_key", F.md5(F.col("intlaqscode")))
+    
+    #create table for parameter (pollutants)
+    dim_parameter = silver_df.select(
+        "parameter",
+        "unit"
+    ).distinct() \
+     .withColumn("parameter_key", F.md5(F.concat_ws("_", F.col("parameter"), F.col("unit"))))
+
+    #create date table
+    dim_date = silver_df.select(
+        "date",
+        "hour"
+    ).distinct() \
+     .withColumn("date_key", F.md5(F.concat_ws("_", F.col("date"), F.col("hour")))) \
+     .withColumn("year", F.year(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
+     .withColumn("month", F.month(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
+     .withColumn("day", F.dayofmonth(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
+     .withColumn("day_of_week", F.dayofweek(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
+     .withColumn("day_name", \
+                                F.when(F.col("day_of_week") == 1, "Sunday")
+                                .when(F.col("day_of_week") == 2, "Monday")
+                                .when(F.col("day_of_week") == 3, "Tuesday")
+                                .when(F.col("day_of_week") == 4, "Wednesday")
+                                .when(F.col("day_of_week") == 5, "Thursday")
+                                .when(F.col("day_of_week") == 6, "Friday")
+                                .when(F.col("day_of_week") == 7, "Saturday")
+                                .otherwise(None))
+    
+    #create category and concern level table
+    dim_category = silver_df.select(
+        "category",
+        "concern_level"
+    ).distinct() \
+    .withColumn("category_key", F.md5(F.col("category").cast("string")))
+
+    # ------------------------------------------------------------------ #
+    # FACT TABLE                                                           #
+    # ------------------------------------------------------------------ #
+
+    fact_table = silver_df \
+        .withColumn("site_key", F.md5(F.col("intlaqscode"))) \
+        .withColumn("parameter_key", F.md5(F.concat_ws("_", F.col("parameter"), F.col("unit")))) \
+        .withColumn("date_key", F.md5(F.concat_ws("_", F.col("date"), F.col("hour")))) \
+        .withColumn("category_key", F.md5(F.col("category").cast("string"))) \
+        .withColumn("composite_key", F.md5(F.col("composite_key"))) \
+        .select(
+            "composite_key",
+            "site_key",
+            "parameter_key",
+            "date_key",
+            "category_key",
+            "aqi",
+            "ingested_at"
+        )
+
+    # ------------------------------------------------------------------ #
+    # WRITE TO GOLD LAYER                                                  #
+    # ------------------------------------------------------------------ #
+
+    dim_site.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_site/")
+    dim_parameter.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_parameter/")
+    dim_date.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_date/")
+    dim_category.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_category/")
+
+    fact_table.write.mode("append").partitionBy("date_key").parquet(
+        "s3a://stream-analytics-project-bucket/gold/fact_air_quality_readings/"
+    )
 
 if __name__ == "__main__":
     # Execute the ETL pipeline sequentially with optional delays between stages
