@@ -23,7 +23,7 @@ def main():
     etl_job.raw_to_bronze()
     etl_job.bronze_to_silver()
     etl_job.silver_to_gold()
-    cleanup_data.move_processed_data(os.getenv("STREAMFLOW_BUCKET_ARCHIVE_PREFIX"), os.getenv("STREAMFLOW_BUCKET_LANDING_PREFIX"))
+    cleanup_data.move_processed_data(os.getenv("STREAMFLOW_BUCKET_LANDING_PREFIX"), os.getenv("STREAMFLOW_BUCKET_ARCHIVE_PREFIX"))
 
 
 if __name__ == "__main__":
