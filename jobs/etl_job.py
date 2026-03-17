@@ -117,7 +117,16 @@ def silver_to_gold():
      .withColumn("year", F.year(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
      .withColumn("month", F.month(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
      .withColumn("day", F.dayofmonth(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
-     .withColumn("day_of_week", F.dayofweek(F.to_date(F.col("date"), "yyyy-MM-dd")))
+     .withColumn("day_of_week", F.dayofweek(F.to_date(F.col("date"), "yyyy-MM-dd"))) \
+     .withColumn("day_name", \
+                                F.when(F.col("day_of_week") == 1, "Sunday")
+                                .when(F.col("day_of_week") == 2, "Monday")
+                                .when(F.col("day_of_week") == 3, "Tuesday")
+                                .when(F.col("day_of_week") == 4, "Wednesday")
+                                .when(F.col("day_of_week") == 5, "Thursday")
+                                .when(F.col("day_of_week") == 6, "Friday")
+                                .when(F.col("day_of_week") == 7, "Saturday")
+                                .otherwise(None))
     
     #create category and concern level table
     dim_category = silver_df.select(
@@ -150,10 +159,10 @@ def silver_to_gold():
     # WRITE TO GOLD LAYER                                                  #
     # ------------------------------------------------------------------ #
 
-    dim_site.write.mode("overwrite").parquet("s3a://stream-analytics-project-bucket/gold/dim_site/")
-    dim_parameter.write.mode("overwrite").parquet("s3a://stream-analytics-project-bucket/gold/dim_parameter/")
-    dim_date.write.mode("overwrite").parquet("s3a://stream-analytics-project-bucket/gold/dim_date/")
-    dim_category.write.mode("overwrite").parquet("s3a://stream-analytics-project-bucket/gold/dim_category/")
+    dim_site.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_site/")
+    dim_parameter.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_parameter/")
+    dim_date.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_date/")
+    dim_category.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_category/")
 
     fact_table.write.mode("append").partitionBy("date_key").parquet(
         "s3a://stream-analytics-project-bucket/gold/fact_air_quality_readings/"
