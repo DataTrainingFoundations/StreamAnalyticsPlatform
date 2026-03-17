@@ -1,13 +1,12 @@
 """
-Producer for Raw Historical Data Kafka Topic
+Helper Functions and Kafka Producers for Raw AirNow Data
 
-This module provides functionality to fetch historical air quality data from the AirNow API
+This module provides functionality to fetch air quality data from the AirNow API
 and publish it to a Kafka topic for downstream processing.
 """
 
 import os
 import json
-import re
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import requests
@@ -19,60 +18,67 @@ from util import constants
 load_dotenv()
 
 docker_env = os.getenv("DOCKER_ENV")
+dev = os.getenv("DEV")
 
-def get_oldest_record_date(bucket_name=None, prefix="landing/airnow/", s3_client=None):
+def get_oldest_record_date():
     """
-    Checks MinIO bucket for the oldest date available in the data warehouse.
+    Checks S3 bucket for the oldest date available in the data warehouse.
 
     Args:
-        bucket_name (str): Name of the MinIO bucket containing historical data.
+        bucket_name (str): Name of the S3 bucket containing historical data.
         prefix (str): Path prefix to look for (default: 'landing/airnow/').
         s3_client (boto3.client, optional): Preconfigured boto3 S3 client.
 
     Returns:
         datetime or None: Oldest date found, or None if bucket is empty.
     """
-    if bucket_name is None:
-        bucket_name = os.getenv("STREAMFLOW_BUCKET")
+    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    if s3_client is None:
-        endpoint = (
-            os.getenv("DOCKER_MINIO_ENDPOINT")
-            if docker_env == "1"
-            else os.getenv("LOCAL_MINIO_ENDPOINT")
-        )
-        s3_client = boto3.client(
+    s3_client = (
+        boto3.client(
             "s3",
-            endpoint_url=endpoint,
+            aws_access_key_id=os.getenv("AWS_USER"),
+            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+            region_name="us-east-1",
+        )
+        if dev != "1"
+        else boto3.client(
+            "s3",
+            endpoint_url=(
+                os.getenv("DOCKER_MINIO_ENDPOINT")
+                if docker_env == "1"
+                else os.getenv("LOCAL_MINIO_ENDPOINT")
+            ),
             aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
             aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
         )
+    )
 
-    # Create bucket, if nonexistent
-    existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
-    if bucket_name not in existing_buckets:
-        s3_client.create_bucket(Bucket=bucket_name)
-        print(f"Created bucket: {bucket_name}")
-
-    # List all objects under the prefix
-    paginator = s3_client.get_paginator("list_objects_v2")
-    dates = []
-
-    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            # Match dt=YYYY-MM-DD pattern in key
-            match = re.search(r"dt=(\d{4}-\d{2}-\d{2})", obj["Key"])
-            if match:
-                dt_str = match.group(1)
-                dt_obj = datetime.strptime(dt_str, "%Y-%m-%d")
-                dates.append(dt_obj)
-
-    if dates:
-        return min(dates)
-    else:
+    try:
+        progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
+        if progress_key:
+            response = s3_client.get_object(
+                Bucket=streamflow_bucket,
+                Key=progress_key
+            )
+            data = json.loads(response["Body"].read())
+            if dev == "1":
+                print("Returning oldest date from db")
+            return datetime.strptime(data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT)
+        else:
+            raise ValueError("Missing streamflow bucket progress key value")
+    except s3_client.exceptions.NoSuchKey:
+        if dev == "1":
+            print("Returning None")
         return None  # No data found
+    except s3_client.exceptions.NoSuchBucket:
+        if dev == "1":
+            print("Returning None")
+        return None  # No data found
+    except ValueError as e:
+        raise RuntimeError("Unable get oldest date from warehouse") from e
 
-def get_times(oldest_date_time=None):
+def get_times(oldest_date_time: datetime | None = None):
     """
     Returns start and end datetimes (as strings) for fetching 2 weeks of historical data.
 
@@ -98,14 +104,18 @@ def get_times(oldest_date_time=None):
         end_dt = today.replace(
             day=1, hour=23, minute=0, second=0, microsecond=0
         ) - timedelta(days=1)
+        if dev == "1":
+            print("Using default dates")
     else:
         # Compute full month before oldest_date_time
         oldest = oldest_date_time.replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = oldest.replace(day=1) - relativedelta(weeks=2)
         end_dt = oldest.replace(day=1, hour=23) - timedelta(days=1)
+        if dev == "1":
+            print("Using calculated dates based on oldest time")
 
-    start_str = start_dt.strftime("%Y-%m-%dT%H")
-    end_str = end_dt.strftime("%Y-%m-%dT%H")
+    start_str = start_dt.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
+    end_str = end_dt.strftime(constants.AIRNOW_UTC_DATE_FORMAT)
     return start_str, end_str
 
 
@@ -148,10 +158,12 @@ def fetch_historic_data(start, end, bbox):
         "verbose": 1,
         "API_KEY": api_key,
     }
+    if dev == "1":
+        print("Returning fetched airnow data")
     return requests.get(airnow_url, params=params, timeout=300).json()
 
 
-def publish_raw_historical_records(records):
+def publish_raw_historical_records(records: list, kafka_topic: str):
     """
     Publishes raw historical records to the corresponding Kafka topic.
 
@@ -169,6 +181,9 @@ def publish_raw_historical_records(records):
     Raises:
         kafka.KafkaError: If publishing to Kafka fails.
     """
+    if not kafka_topic:
+        raise ValueError("Missing kafka_topic parameter")
+
     bootstrap_server = (
         os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
         if docker_env == "1"
@@ -178,7 +193,6 @@ def publish_raw_historical_records(records):
         bootstrap_servers=bootstrap_server,
         value_serializer=lambda v: json.dumps(v).encode(),
     )
-    kafka_topic = os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC")
     for record in records:
         # record["ingested_at"] = datetime.now().isoformat()
         message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
@@ -189,48 +203,11 @@ def publish_raw_historical_records(records):
         )
 
     producer.flush()
-    print("Batch sent.")
-
-def fetch_current_data(bbox):
-    """
-    Fetches current hour of air quality data from the AirNow API for a given bounding box.
-
-    Args:
-        bbox (str): Bounding box coordinates as a comma-separated string 
-        (e.g., "lat1,lng1,lat2,lng2").
-
-    Returns:
-        list: List of air quality measurement records from the API.
-
-    Raises:
-        ValueError: If required environment variables (API key or URL) are missing.
-        requests.RequestException: If the API request fails.
-
-    Environment Variables:
-        - AIRNOW_API_KEY: API key for AirNow API access
-        - AIRNOW_DATA_URL: Base URL for AirNow data API
-    """
-    api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
-
-    if api_key == "":
-        raise ValueError("Missing API key")
-    if airnow_url == "":
-        raise ValueError("Missing airnow url")
-
-    params = {
-        "parameters": constants.POLLUTANTS,
-        "BBOX": bbox,
-        "dataType": "A",
-        "format": "application/json",
-        "verbose": 1,
-        "API_KEY": api_key,
-    }
-    return requests.get(airnow_url, params=params, timeout=300).json()
+    if dev == "1":
+        print("Batch sent.")
 
 
-
-def main():
+def run_historic_producer():
     """
     Main function for running the producer locally.
 
@@ -241,45 +218,31 @@ def main():
     i = 0
     for bbox in constants.BBOXES:
         try:
-            if i == 5:
+            if i == 5 and dev == "1":
                 break
-            records = fetch_historic_data(start, end, bbox)
-            publish_raw_historical_records(records)
+            records = fetch_month_data(start, end, bbox)
+            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+            i += 1
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
 
 
 if __name__ == "__main__":
-    # main()
-
-    TEST_BBOXES = [
-    # mixed box to inspect
-    "-154.96225,19.4383,-123.1824,39.46574",
-
-    # nearby Hawaii boxes
-    "-159.385,20.86341,-156.66389,21.9695",
-    "-156.70384,20.84897,-156.47242,20.92447",
-    "-156.4661,19.59192,-155.03504,20.92203",
-    "-155.9333,19.04066,-154.9244,19.5898",
-
-    # nearby California boxes
-    "-123.21849,38.1069,-122.702,39.44513",
-    "-123.1867,39.86546,-122.37355,41.47745",
-    "-122.742,38.2908,-122.1703,39.55387",
-    "-122.5389,37.9278,-122.1133,38.3164",
-    "-122.52047,36.9919,-122.14991,37.8978"
-    ]
-    
-    start = "2025-03-11T00"
-    end = "2025-03-11T23"
-
-    for bbox in TEST_BBOXES:
-        try:
-            records = fetch_historic_data(start, end, bbox)
-            unique_sites = len(set(r["IntlAQSCode"] for r in records))
-            print(f"SUCCESS {bbox} -> {unique_sites} unique sites, {len(records)} rows")
-        except Exception as e:
-            print(f"Failed at {bbox} for time period {start} - {end}")
-            print("Failure due to the following error:\n", e)   
-
+    while True:
+        choice = input(
+            """
+            \n\nSelect which producer to run:
+                '1': Historic
+                '2': Current\n\n 
+            """
+        )
+        match choice:
+            case "1":
+                run_historic_producer()
+                break
+            case "2":
+                # current producer function call goes here
+                break
+            case _:
+                print("Invalid input. Please choose from the options below:")
