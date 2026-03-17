@@ -116,8 +116,6 @@ def bronze_to_silver():
             .when(clean_df.Category == 6, "Hazardous")
             .otherwise(None),
         )
-        # # Drop the original 'Category' column as it's replaced by 'concern_level'
-        # clean_df = clean_df.drop("Category")
         # Drop unnecessary columns: FullAQSCode, UTC, ingested_at
         clean_df = clean_df.drop("FullAQSCode")
         clean_df = clean_df.drop("UTC")
