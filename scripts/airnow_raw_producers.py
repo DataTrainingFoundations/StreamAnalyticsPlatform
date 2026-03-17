@@ -74,7 +74,7 @@ def get_oldest_record_date(bucket_name=None, prefix="landing/airnow/", s3_client
 
 def get_times(oldest_date_time=None):
     """
-    Returns start and end datetimes (as strings) for fetching a full month of historical data.
+    Returns start and end datetimes (as strings) for fetching 2 weeks of historical data.
 
     If oldest_date_time is None, checks the warehouse to find the oldest record.
     If no records exist, defaults to the previous month from today.
@@ -94,14 +94,14 @@ def get_times(oldest_date_time=None):
         today = datetime.now()
         start_dt = today.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
-        ) - relativedelta(months=1)
+        ) - relativedelta(weeks=2)
         end_dt = today.replace(
             day=1, hour=23, minute=0, second=0, microsecond=0
         ) - timedelta(days=1)
     else:
         # Compute full month before oldest_date_time
         oldest = oldest_date_time.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_dt = oldest.replace(day=1) - relativedelta(months=1)
+        start_dt = oldest.replace(day=1) - relativedelta(weeks=2)
         end_dt = oldest.replace(day=1, hour=23) - timedelta(days=1)
 
     start_str = start_dt.strftime("%Y-%m-%dT%H")
@@ -109,7 +109,7 @@ def get_times(oldest_date_time=None):
     return start_str, end_str
 
 
-def fetch_month_data(start, end, bbox):
+def fetch_historic_data(start, end, bbox):
     """
     Fetches historical air quality data from the AirNow API for a given time range and bounding box.
 
@@ -243,7 +243,7 @@ def main():
         try:
             if i == 5:
                 break
-            records = fetch_month_data(start, end, bbox)
+            records = fetch_historic_data(start, end, bbox)
             publish_raw_historical_records(records)
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
@@ -254,27 +254,31 @@ if __name__ == "__main__":
     # main()
 
     TEST_BBOXES = [
-    "-122.09562,37.98631,-121.40084,38.58075",
-    "-108.7403,42.5075,-105.28353,43.77157",
-    "-105.1986,39.69437,-105.10394,39.7619",
-    "-105.1589,39.6189,-105.10394,39.73436",
-    "-105.14394,39.69432,-105.10393,39.73439",
-    "-105.14393,39.5139,-105.0108,39.7719",
-    "-104.77168,47.10072,-101.4081,48.6619",
-    "-97.3222,34.75639,-95.99578,36.7242",
-    "-105.2867,39.7806,-104.70613,40.20161",
-    "-97.17381,32.8,-95.3013,34.0353",
-    "-96.15745,39.72167,-94.829,41.34247",
-    "-83.17789,41.47219,-81.22216,42.3275"
+    # mixed box to inspect
+    "-154.96225,19.4383,-123.1824,39.46574",
+
+    # nearby Hawaii boxes
+    "-159.385,20.86341,-156.66389,21.9695",
+    "-156.70384,20.84897,-156.47242,20.92447",
+    "-156.4661,19.59192,-155.03504,20.92203",
+    "-155.9333,19.04066,-154.9244,19.5898",
+
+    # nearby California boxes
+    "-123.21849,38.1069,-122.702,39.44513",
+    "-123.1867,39.86546,-122.37355,41.47745",
+    "-122.742,38.2908,-122.1703,39.55387",
+    "-122.5389,37.9278,-122.1133,38.3164",
+    "-122.52047,36.9919,-122.14991,37.8978"
     ]
     
-    start = datetime(2026, 3, 11, 0, 0)
-    end   = datetime(2026, 3, 11, 23, 0)
+    start = "2025-03-11T00"
+    end = "2025-03-11T23"
 
     for bbox in TEST_BBOXES:
         try:
-            records = fetch_month_data(start, end, bbox)
-            len(set(r["IntlAQSCode"] for r in records))
+            records = fetch_historic_data(start, end, bbox)
+            unique_sites = len(set(r["IntlAQSCode"] for r in records))
+            print(f"SUCCESS {bbox} -> {unique_sites} unique sites, {len(records)} rows")
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)   

@@ -10,7 +10,7 @@ from airflow.operators.python import PythonOperator
 from util import constants
 from scripts.airnow_raw_producers import (
     get_times,
-    fetch_month_data,
+    fetch_historic_data,
     publish_raw_historical_records
 )
 from scripts.ingest_kafka_to_landing import (
@@ -53,7 +53,7 @@ def produce_historical_data():
         try:
             if i == 5:
                 break
-            records = fetch_month_data(start, end, bbox)
+            records = fetch_historic_data(start, end, bbox)
             publish_raw_historical_records(records)
             print(f"✓ Published {len(records)} records to Kafka")
             i += 1

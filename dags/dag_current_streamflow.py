@@ -29,11 +29,11 @@ default_args = {
 }
 
 
-def produce_historical_data():
+def produce_current_data():
     """
-    Execute the AirNow data producer to fetch and publish historical air quality data.
+    Execute the AirNow data producer to fetch and publish current air quality data.
 
-    This function fetches historical air quality data for the previous month from multiple
+    This function fetches air quality data for the current hour from multiple
     bounding boxes (limited to first 5 for testing) and publishes the records to Kafka.
     It's designed to be called as an Airflow task.
 
@@ -53,21 +53,20 @@ def produce_historical_data():
                 break
             records = fetch_current_data(bbox)
             publish_raw_historical_records(records)
-            print(f"✓ Published {len(records)} records to Kafka")
+            print(f"Published {len(records)} records to Kafka")
             i += 1
         except Exception as e:
             print(
-                f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
+                f"Producer failed at {bbox} for time period {datetime.now()}: {str(e)}"
             )
             raise
 
 
 # Define the DAG with its configuration
 with DAG(
-    dag_id="streamflow_historic",
+    dag_id="streamflow_current",
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
-    start_date=datetime(2024, 1, 1),
     schedule=None,  # Manual trigger only
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
@@ -76,8 +75,8 @@ with DAG(
     # Task 1: Produce raw data from AirNow API to Kafka
     produce_raw_data = PythonOperator(
         task_id="produce_raw_data_to_kafka",
-        python_callable=produce_historical_data,
-        doc="Fetch historical air quality data from AirNow API and publish to Kafka",
+        python_callable=produce_current_data,
+        doc="Fetch current air quality data from AirNow API and publish to Kafka",
     )
 
     # Task 2: Consume Kafka messages and write to landing zone (MinIO)
