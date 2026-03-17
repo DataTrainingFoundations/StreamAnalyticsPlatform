@@ -12,13 +12,11 @@ from dateutil.relativedelta import relativedelta
 import requests
 from kafka import KafkaProducer
 import boto3
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from util import constants
 
 load_dotenv()
-
-docker_env = os.getenv("DOCKER_ENV")
-dev = os.getenv("DEV")
 
 def get_oldest_record_date():
     """
@@ -32,6 +30,7 @@ def get_oldest_record_date():
     Returns:
         datetime or None: Oldest date found, or None if bucket is empty.
     """
+    dev = os.getenv("DEV")
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
     s3_client = (
@@ -39,14 +38,14 @@ def get_oldest_record_date():
             "s3",
             aws_access_key_id=os.getenv("AWS_USER"),
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-            region_name="us-east-1",
+            region_name=os.getenv("AWS_REGION_NAME"),
         )
         if dev != "1"
         else boto3.client(
             "s3",
             endpoint_url=(
                 os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
+                if os.getenv("DOCKER_ENV") == "1"
                 else os.getenv("LOCAL_MINIO_ENDPOINT")
             ),
             aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
@@ -67,16 +66,15 @@ def get_oldest_record_date():
             return datetime.strptime(data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT)
         else:
             raise ValueError("Missing streamflow bucket progress key value")
-    except s3_client.exceptions.NoSuchKey:
-        if dev == "1":
-            print("Returning None")
-        return None  # No data found
-    except s3_client.exceptions.NoSuchBucket:
-        if dev == "1":
-            print("Returning None")
-        return None  # No data found
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code in ["NoSuchKey", "NoSuchBucket"]:
+            if dev == "1":
+                print("Returning None")
+            return None
+        raise  # re-raise unexpected errors
     except ValueError as e:
-        raise RuntimeError("Unable get oldest date from warehouse") from e
+        raise RuntimeError("Unable to get oldest date from warehouse") from e
 
 def get_times(oldest_date_time: datetime | None = None):
     """
@@ -91,6 +89,8 @@ def get_times(oldest_date_time: datetime | None = None):
     Returns:
         tuple: (start_str, end_str) where both are strings in "YYYY-MM-DDTHH" format
     """
+    dev = os.getenv("DEV")
+
     if oldest_date_time is None:
         # Check MinIO for the oldest record
         oldest_date_time = get_oldest_record_date()
@@ -140,6 +140,7 @@ def fetch_month_data(start, end, bbox):
         - AIRNOW_API_KEY: API key for AirNow API access
         - AIRNOW_DATA_URL: Base URL for AirNow data API
     """
+    dev = os.getenv("DEV")
     api_key = os.getenv("AIRNOW_API_KEY", "")
     airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
@@ -181,6 +182,9 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
     Raises:
         kafka.KafkaError: If publishing to Kafka fails.
     """
+    docker_env = os.getenv("DOCKER_ENV")
+    dev = os.getenv("DEV")
+
     if not kafka_topic:
         raise ValueError("Missing kafka_topic parameter")
 
@@ -214,6 +218,8 @@ def run_historic_producer():
     Fetches historical data for the previous month across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
+    dev = os.getenv("DEV")
+
     start, end = get_times()
     i = 0
     for bbox in constants.BBOXES:

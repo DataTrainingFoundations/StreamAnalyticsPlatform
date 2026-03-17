@@ -22,7 +22,7 @@ def move_processed_data(source_prefix, dest_prefix):
             "s3",
             aws_access_key_id=os.getenv("AWS_USER"),
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-            region_name="us-east-1",
+            region_name=os.getenv("AWS_REGION_NAME"),
         )
         if dev != "1"
         else boto3.client(

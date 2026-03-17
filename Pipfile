@@ -11,6 +11,8 @@ boto3 = "*"
 apache-airflow = "==2.8.1"
 flask = "*"
 streamlit = "*"
+pytest-mock = "*"
+moto = "*"
 
 [dev-packages]
 pytest = "*"
