@@ -216,8 +216,7 @@ def silver_to_gold():
             "parameter_key",
             "date_key",
             "category_key",
-            "aqi",
-            "ingested_at"
+            "aqi"
         )
 
     # ------------------------------------------------------------------ #
