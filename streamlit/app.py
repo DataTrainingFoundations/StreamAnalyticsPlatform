@@ -81,10 +81,39 @@ y_options = allowed_columns(CHART_AXIS_TYPES[chart_type]["y"])
 x_axis = st.sidebar.selectbox("X-axis", x_options) if x_options else None
 y_axis = st.sidebar.selectbox("Y-axis", y_options) if y_options else None
 
+# Parameter
+parameter_options = df["parameter"].unique().tolist()
+selected_parameter = st.sidebar.selectbox("Select Parameter", ["All"] + parameter_options)
+
+# US Regions by lat/lon
+US_REGIONS = {
+    "Northeast": {"lat_min": 36.5, "lat_max": 47.5, "lon_min": -80, "lon_max": -66},
+    "Midwest":   {"lat_min": 36.5, "lat_max": 49.5, "lon_min": -104, "lon_max": -80},
+    "South":     {"lat_min": 25,   "lat_max": 36.5, "lon_min": -105, "lon_max": -75},
+    "West":      {"lat_min": 31,   "lat_max": 49.5, "lon_min": -125, "lon_max": -104},
+    "Alaska":    {"lat_min": 51,   "lat_max": 71,    "lon_min": -170, "lon_max": -130},
+    "Hawaii":    {"lat_min": 18.5, "lat_max": 22.5,  "lon_min": -161, "lon_max": -154}
+}
+
+region_options = ["All"] + list(US_REGIONS.keys())
+selected_region = st.sidebar.selectbox("Select US Region", region_options)
+
 # --------------------------------------------------
 # Filter invalid AQI values
 # --------------------------------------------------
 df_plot = df.dropna(subset=["aqi"])
+
+if selected_parameter != "All":
+    df_plot = df_plot[df_plot["parameter"] == selected_parameter]
+
+if selected_region != "All":
+    region = US_REGIONS[selected_region]
+    df_plot = df_plot[
+        (df_plot["latitude"] >= region["lat_min"]) &
+        (df_plot["latitude"] <= region["lat_max"]) &
+        (df_plot["longitude"] >= region["lon_min"]) &
+        (df_plot["longitude"] <= region["lon_max"])
+    ]
 
 st.subheader(f"{chart_type}")
 
