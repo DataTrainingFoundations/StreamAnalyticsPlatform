@@ -241,16 +241,12 @@ def run_historic_producer():
     and publishes to Kafka. This is primarily for testing and development.
     """
     start, end = get_times()
-    # i = 0
     for bbox in constants.BBOXES:
         try:
-            # if i == 5 and dev == "1":
-            #     break
             records = fetch_historic_data(start, end, bbox)
             publish_raw_historical_records(
                 records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
             )
-            # i += 1
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)

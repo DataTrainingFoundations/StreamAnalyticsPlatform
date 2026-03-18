@@ -82,15 +82,11 @@ def produce_historical_data(**context):
         key="oldest_date"
     )
     start, end = get_times(oldest_date)
-    i = 0
     for bbox in constants.BBOXES:
         try:
-            if i == 5 and DEV == "1":
-                break
             records = fetch_historic_data(start, end, bbox)
             publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
             print(f"✓ Published {len(records)} records to Kafka")
-            i += 1
         except Exception as e:
             print(
                 f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
@@ -132,8 +128,9 @@ with DAG(
     dag_id="streamflow_historic",
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
-    start_date=datetime(2026, 3, 1),
-    schedule="0 */2 * * *",  # Every 2 hours
+    start_date=datetime(2026, 3, 18),
+    schedule="@hourly", #0 */2 * * *",  # Every 2 hours
+    max_active_runs=1,
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
 ) as dag:

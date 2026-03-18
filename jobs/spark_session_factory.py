@@ -53,13 +53,16 @@ def create_spark_session(
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
-        .config("spark.sql.shuffle.partitions", "8")
+        .config("spark.sql.shuffle.partitions", "24")
         .config("spark.driver.memory", "2g")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.hadoop.fs.s3a.fast.upload", "true")
         .config("spark.hadoop.fs.s3a.fast.upload.buffer", "disk")
         .config("spark.hadoop.fs.s3a.multipart.size", "104857600")  # 100 MB
         .config("spark.hadoop.fs.s3a.connection.maximum", "100")
+        .config("spark.executor.memory", "4g")
+        .config("spark.executor.cores", "2")
+        .config("spark.executor.instances", "3")  # if scaling workers
         # if dev != "1"
         # else SparkSession.builder
         # .appName(app_name) # type: ignore

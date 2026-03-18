@@ -24,17 +24,17 @@ def move_processed_data(source_prefix, dest_prefix):
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
             region_name="us-east-1",
         )
-        if dev != "1"
-        else boto3.client(
-            "s3",
-            endpoint_url=(
-                os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT")
-            ),
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+        # if dev != "1"
+        # else boto3.client(
+        #     "s3",
+        #     endpoint_url=(
+        #         os.getenv("DOCKER_MINIO_ENDPOINT")
+        #         if docker_env == "1"
+        #         else os.getenv("LOCAL_MINIO_ENDPOINT")
+        #     ),
+        #     aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+        #     aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        # )
     )
 
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
