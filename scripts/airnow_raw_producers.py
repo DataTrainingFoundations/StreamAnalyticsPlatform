@@ -255,14 +255,10 @@ def run_historic_producer():
     and publishes to Kafka. This is primarily for testing and development.
     """
     start, end = get_times()
-    i = 0
     for bbox in constants.BBOXES:
         try:
-            if i == 5 and dev == "1":
-                break
             records = fetch_month_data(start, end, bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
-            i += 1
+            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
@@ -274,14 +270,11 @@ def run_current_producer():
     Fetches current hour data across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
-    i = 0
+    
     for bbox in constants.BBOXES:
         try:
-            if i == 5 and dev == "1":
-                break
             records = fetch_current_data(bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
-            i += 1
+            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
         except Exception as e:
             print(f"Failed at {bbox} for time period {datetime.now()}")
             print("Failure due to the following error:\n", e)
@@ -300,7 +293,7 @@ if __name__ == "__main__":
                 run_historic_producer()
                 break
             case "2":
-                # current producer function call goes here
+                run_current_producer()
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")
