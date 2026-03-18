@@ -119,7 +119,7 @@ def get_times(oldest_date_time: datetime | None = None):
     return start_str, end_str
 
 
-def fetch_historic_data(start, end, bbox):
+def fetch_month_data(start, end, bbox):
     """
     Fetches historical air quality data from the AirNow API for a given time range and bounding box.
 
@@ -206,6 +206,46 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
     if dev == "1":
         print("Batch sent.")
 
+def fetch_current_data(bbox):
+    """
+    Fetches current air quality data from the AirNow API for the current hour and bounding box.
+
+    Args:
+        bbox (str): Bounding box coordinates as a comma-separated string 
+        (e.g., "lat1,lng1,lat2,lng2").
+
+    Returns:
+        list: List of air quality measurement records from the API.
+
+    Raises:
+        ValueError: If required environment variables (API key or URL) are missing.
+        requests.RequestException: If the API request fails.
+
+    Environment Variables:
+        - AIRNOW_API_KEY: API key for AirNow API access
+        - AIRNOW_DATA_URL: Base URL for AirNow data API
+    """
+    api_key = os.getenv("AIRNOW_API_KEY", "")
+    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
+
+    if api_key == "":
+        raise ValueError("Missing API key")
+    if airnow_url == "":
+        raise ValueError("Missing airnow url")
+
+    params = {
+        "parameters": constants.POLLUTANTS,
+        "BBOX": bbox,
+        "dataType": "A",
+        "format": "application/json",
+        "verbose": 1,
+        "API_KEY": api_key,
+    }
+    if dev == "1":
+        print("Returning fetched airnow data")
+    return requests.get(airnow_url, params=params, timeout=300).json()
+
+
 
 def run_historic_producer():
     """
@@ -221,12 +261,30 @@ def run_historic_producer():
             if i == 5 and dev == "1":
                 break
             records = fetch_month_data(start, end, bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
             i += 1
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
 
+def run_current_producer():
+    """
+    Main function for running the current producer locally.
+
+    Fetches current hour data across all bounding boxes
+    and publishes to Kafka. This is primarily for testing and development.
+    """
+    i = 0
+    for bbox in constants.BBOXES:
+        try:
+            if i == 5 and dev == "1":
+                break
+            records = fetch_current_data(bbox)
+            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+            i += 1
+        except Exception as e:
+            print(f"Failed at {bbox} for time period {datetime.now()}")
+            print("Failure due to the following error:\n", e)
 
 if __name__ == "__main__":
     while True:

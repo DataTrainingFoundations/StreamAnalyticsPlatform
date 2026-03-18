@@ -15,7 +15,7 @@ from util import constants
 from scripts.airnow_raw_producers import (
     get_oldest_record_date,
     get_times,
-    fetch_historic_data,
+    fetch_month_data,
     publish_raw_historical_records
 )
 from scripts.ingest_kafka_to_landing import (
