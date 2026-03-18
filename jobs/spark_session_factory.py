@@ -42,6 +42,10 @@ def create_spark_session(
         SparkSession.builder
         .appName(app_name) # type: ignore
         .master(master)
+        .config(
+            "spark.jars.packages",
+            "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        )
         .config("spark.hadoop.fs.s3a.endpoint", os.getenv("AWS_ENDPOINT"))
         .config("spark.hadoop.fs.s3a.access.key", os.getenv("AWS_USER"))
         .config("spark.hadoop.fs.s3a.secret.key", os.getenv("AWS_PASSWORD"))
@@ -56,26 +60,26 @@ def create_spark_session(
         .config("spark.hadoop.fs.s3a.fast.upload.buffer", "disk")
         .config("spark.hadoop.fs.s3a.multipart.size", "104857600")  # 100 MB
         .config("spark.hadoop.fs.s3a.connection.maximum", "100")
-        if dev != "1"
-        else SparkSession.builder
-        .appName(app_name) # type: ignore
-        .master(master)
-        .config(
-            "spark.jars.packages",
-            "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
-        )
-        .config("spark.hadoop.fs.s3a.endpoint", os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT"))
-        .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ROOT_USER"))
-        .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_ROOT_PASSWORD"))
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-        .config("spark.sql.adaptive.enabled", "true")
-        .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
-        .config("spark.sql.shuffle.partitions", "8")
-        .config("spark.driver.memory", "2g")
-        .config("spark.sql.session.timeZone", "UTC")
+        # if dev != "1"
+        # else SparkSession.builder
+        # .appName(app_name) # type: ignore
+        # .master(master)
+        # .config(
+        #     "spark.jars.packages",
+        #     "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        # )
+        # .config("spark.hadoop.fs.s3a.endpoint", os.getenv("DOCKER_MINIO_ENDPOINT")
+        #         if docker_env == "1"
+        #         else os.getenv("LOCAL_MINIO_ENDPOINT"))
+        # .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ROOT_USER"))
+        # .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_ROOT_PASSWORD"))
+        # .config("spark.hadoop.fs.s3a.path.style.access", "true")
+        # .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+        # .config("spark.sql.adaptive.enabled", "true")
+        # .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+        # .config("spark.sql.shuffle.partitions", "8")
+        # .config("spark.driver.memory", "2g")
+        # .config("spark.sql.session.timeZone", "UTC")
     )
 
     if config_overrides:
