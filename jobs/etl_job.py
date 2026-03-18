@@ -116,8 +116,6 @@ def bronze_to_silver():
             .when(clean_df.Category == 6, "Hazardous")
             .otherwise(None),
         )
-        # Drop the original 'Category' column as it's replaced by 'concern_level'
-        clean_df = clean_df.drop("Category")
         # Drop unnecessary columns: FullAQSCode, UTC, ingested_at
         clean_df = clean_df.drop("FullAQSCode")
         clean_df = clean_df.drop("UTC")
@@ -218,11 +216,18 @@ def silver_to_gold():
             "category_key",
             "aqi"
         )
-
+    
     # ------------------------------------------------------------------ #
     # WRITE TO GOLD LAYER                                                  #
     # ------------------------------------------------------------------ #
-
+    gold_df = (
+        fact_table
+        .join(dim_site, "site_key", "left")
+        .join(dim_parameter, "parameter_key", "left")
+        .join(dim_date, "date_key", "left")
+        .join(dim_category, "category_key", "left")
+    )
+    gold_df.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/gold_df/")
     dim_site.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_site/")
     dim_parameter.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_parameter/")
     dim_date.write.mode("append").parquet("s3a://stream-analytics-project-bucket/gold/dim_date/")
