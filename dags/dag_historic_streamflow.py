@@ -15,7 +15,7 @@ from util import constants
 from scripts.airnow_raw_producers import (
     get_oldest_record_date,
     get_times,
-    fetch_month_data,
+    fetch_historic_data,
     publish_raw_historical_records
 )
 from scripts.ingest_kafka_to_landing import (
@@ -87,7 +87,7 @@ def produce_historical_data(**context):
         try:
             if i == 5 and DEV == "1":
                 break
-            records = fetch_month_data(start, end, bbox)
+            records = fetch_historic_data(start, end, bbox)
             publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
             print(f"✓ Published {len(records)} records to Kafka")
             i += 1
@@ -132,8 +132,8 @@ with DAG(
     dag_id="streamflow_historic",
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
-    start_date=datetime(2024, 1, 1),
-    schedule="@hourly",
+    start_date=datetime(2026, 3, 1),
+    schedule="0 */2 * * *",  # Every 2 hours
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
 ) as dag:

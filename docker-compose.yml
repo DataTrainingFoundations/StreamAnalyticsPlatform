@@ -138,8 +138,8 @@ services:
         condition: service_started
     environment:
       - SPARK_MASTER=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G
-      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=12G
+      - SPARK_WORKER_CORES=6
       - SPARK_NO_DAEMONIZE=true
     command: [ "/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077" ]
     volumes:
