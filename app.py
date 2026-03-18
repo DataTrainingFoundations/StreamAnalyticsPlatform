@@ -1,3 +1,5 @@
+import subprocess
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,6 +18,8 @@ st.title("Air Quality Dashboard")
 # # --------------------------------------------------
 # # Load data
 # # --------------------------------------------------
+
+@st.cache_data(ttl=300)
 def load_data():
     base_path = "s3://stream-analytics-project-bucket/gold/"
 
@@ -27,32 +31,30 @@ def load_data():
         }
     }
 
-    # fact = pd.read_parquet(base_path + "fact_air_quality_readings/", storage_options=storage_options)
-    # site = pd.read_parquet(base_path + "dim_site/", storage_options=storage_options)
-    # param = pd.read_parquet(base_path + "dim_parameter/", storage_options=storage_options)
-    # date = pd.read_parquet(base_path + "dim_date/", storage_options=storage_options)
-    # category = pd.read_parquet(base_path + "dim_category/", storage_options=storage_options)
+    fact = pd.read_parquet(base_path + "fact_air_quality_readings/", storage_options=storage_options)
+    site = pd.read_parquet(base_path + "dim_site/", storage_options=storage_options)
+    param = pd.read_parquet(base_path + "dim_parameter/", storage_options=storage_options)
+    date = pd.read_parquet(base_path + "dim_date/", storage_options=storage_options)
+    category = pd.read_parquet(base_path + "dim_category/", storage_options=storage_options)
 
-    df = pd.read_parquet(base_path + "gold_df/", storage_options=storage_options)
-
-    return df
-
-df = load_data()
+    return fact, site, param, date, category
 
 
+fact, site, param, date, category = load_data()
 # --------------------------------------------------
 # Axis schema (MATCHES YOUR DATA)
 # --------------------------------------------------
 AXIS_OPTIONS = {
-    "numeric": ["aqi", "latitude", "longitude", "hour"],
+    "numeric": ["aqi"],
     "temporal": ["date"],
     "categorical": [
         "parameter",
         "sitename",
         "agencyname",
         "unit",
-        "concern_level"
-    ]
+        "concern_level",
+        "hour"
+    ],
 }
 
 # --------------------------------------------------
@@ -60,13 +62,10 @@ AXIS_OPTIONS = {
 # --------------------------------------------------
 CHART_AXIS_TYPES = {
     "Line": {"x": ["temporal"], "y": ["numeric"]},
-    "Scatter": {"x": ["numeric"], "y": ["numeric"]},
     "Bar": {"x": ["categorical"], "y": ["numeric"]},
     "Box": {"x": ["categorical"], "y": ["numeric"]},
-    "Histogram": {"x": ["numeric"], "y": []},
     "Pie": {"x": ["categorical"], "y": []},
-    "Pollution Map": {"x": [], "y": []},
-    "Heatmap": {"x": ["temporal", "categorical"], "y": ["categorical", "numeric"]}
+    "Pollution Map": {"x": [], "y": []}
 }
 
 # --------------------------------------------------
@@ -89,7 +88,7 @@ x_axis = st.sidebar.selectbox("X-axis", x_options) if x_options else None
 y_axis = st.sidebar.selectbox("Y-axis", y_options) if y_options else None
 
 # Parameter
-parameter_options = df["parameter"].unique().tolist()
+parameter_options = param["parameter"].unique().tolist()
 selected_parameter = st.sidebar.selectbox("Select Parameter", ["All"] + parameter_options)
 
 # US Regions by lat/lon
@@ -105,64 +104,68 @@ US_REGIONS = {
 region_options = ["All"] + list(US_REGIONS.keys())
 selected_region = st.sidebar.selectbox("Select US Region", region_options)
 
-
-if selected_parameter != "All":
-    df = df[df["parameter"] == selected_parameter]
-
-if selected_region != "All":
-    region = US_REGIONS[selected_region]
-    df = df[
-        (df["latitude"] >= region["lat_min"]) &
-        (df["latitude"] <= region["lat_max"]) &
-        (df["longitude"] >= region["lon_min"]) &
-        (df["longitude"] <= region["lon_max"])
-    ]
-
 st.subheader(f"{chart_type}")
 
 # --------------------------------------------------
 # Line: Average AQI by Date
 # --------------------------------------------------
 if chart_type == "Line":
-    df_line = (
-        df
-        .groupby("date", as_index=False)["aqi"]
-        .mean()
-        .sort_values("date")
-    )
-    fig = px.line(
-        df_line,
-        x=x_axis,
-        y=y_axis,
-    )
+    # Merge only the columns needed
+    df_line = fact.merge(date, on="date_key")
+    df_line = df_line.merge(site, on="site_key")
+    # with st.expander("show df_line"):
+    #     st.dataframe(df_line)
+    if selected_parameter != "All":
+        allowed_keys = param[param["parameter"] == selected_parameter]["parameter_key"]
+        df_line = df_line[df_line["parameter_key"].isin(allowed_keys)]
 
-    st.plotly_chart(fig, use_container_width=True)
+    # Filter by region
+    if selected_region != "All":
+        region = US_REGIONS[selected_region]
+        df_line = df_line[
+            (df_line["latitude"] >= region["lat_min"]) &
+            (df_line["latitude"] <= region["lat_max"]) &
+            (df_line["longitude"] >= region["lon_min"]) &
+            (df_line["longitude"] <= region["lon_max"])
+        ]
 
-# --------------------------------------------------
-# Scatter
-# --------------------------------------------------
-elif chart_type == "Scatter":
-    fig = px.scatter(
-        df,
-        x=x_axis,
-        y=y_axis,
-        color="parameter"
-    )
+    df_line = df_line.groupby("date", as_index=False)["aqi"].mean().sort_values("date")
+    
+    # st.write(df_line.head())
+    fig = px.line(df_line, x=x_axis, y=y_axis)
     st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
 # Bar
 # --------------------------------------------------
 elif chart_type == "Bar":
-    agg = (
-        df
-        .groupby(x_axis, as_index=False)["aqi"]
-        .mean()
-    )
+    # Merge only the hour column from date
+    df_bar = fact.merge(date[["date_key", "hour"]], on="date_key", how="left")
+
+    # Filter by parameter if selected
+    if selected_parameter != "All":
+        allowed_keys = param[param["parameter"] == selected_parameter]["parameter_key"]
+        df_bar = df_bar[df_bar["parameter_key"].isin(allowed_keys)]
+
+    # Filter by region if selected
+    if selected_region != "All":
+        df_bar = df_bar.merge(site[["site_key", "latitude", "longitude"]], on="site_key", how="left")
+        region = US_REGIONS[selected_region]
+        df_bar = df_bar[
+            (df_bar["latitude"] >= region["lat_min"]) &
+            (df_bar["latitude"] <= region["lat_max"]) &
+            (df_bar["longitude"] >= region["lon_min"]) &
+            (df_bar["longitude"] <= region["lon_max"])
+        ]
+
+    # Group by hour and compute average AQI
+    agg = df_bar.groupby("hour", as_index=False)["aqi"].mean()
+
     fig = px.bar(
         agg,
-        x=x_axis,
-        y=y_axis,
+        x="hour",
+        y="aqi",
+        labels={"hour": "Hour (UTC)", "aqi": "Average AQI"}
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -171,31 +174,109 @@ elif chart_type == "Bar":
 # Box
 # --------------------------------------------------
 elif chart_type == "Box":
-    fig = px.box(df, x=x_axis, y="aqi", color=x_axis)
-    st.plotly_chart(fig, use_container_width=True)
+    # Merge minimal columns needed
+    df_box = fact.merge(
+        site[["site_key", "sitename"]],
+        on="site_key",
+        how="left"
+    ).merge(
+        param[["parameter_key", "parameter"]],
+        on="parameter_key",
+        how="left"
+    )
 
-# --------------------------------------------------
-# Histogram
-# --------------------------------------------------
-elif chart_type == "Histogram":
-    fig = px.histogram(df, x=x_axis)
+    # Filter by region if selected
+    if selected_region != "All":
+        region = US_REGIONS[selected_region]
+        df_box = df_box.merge(site[["site_key", "latitude", "longitude"]], on="site_key")
+        df_box = df_box[
+            (df_box["latitude"] >= region["lat_min"]) &
+            (df_box["latitude"] <= region["lat_max"]) &
+            (df_box["longitude"] >= region["lon_min"]) &
+            (df_box["longitude"] <= region["lon_max"])
+        ]
+
+    # Filter by parameter
+    if selected_parameter != "All":
+        df_box = df_box[df_box["parameter"] == selected_parameter]
+
+    # Ensure x_axis exists in df_box
+    if x_axis not in df_box.columns:
+        st.warning(f"Column {x_axis} not found in data. Using 'parameter' instead.")
+        x_axis = "parameter"
+
+    fig = px.box(
+        df_box,
+        x=x_axis,
+        y="aqi",
+        color=x_axis if df_box[x_axis].dtype == "object" else None,
+        title=f"AQI distribution by {x_axis}"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
 # Pie
 # --------------------------------------------------
 elif chart_type == "Pie":
-    counts = df[x_axis].value_counts().reset_index()
+    # Merge minimal columns needed
+    df_pie = fact.merge(
+        site[["site_key", "sitename"]],
+        on="site_key",
+        how="left"
+    ).merge(
+        param[["parameter_key", "parameter"]],
+        on="parameter_key",
+        how="left"
+    )
+
+    # Filter by region if selected
+    if selected_region != "All":
+        region = US_REGIONS[selected_region]
+        df_pie = df_pie.merge(site[["site_key", "latitude", "longitude"]], on="site_key")
+        df_pie = df_pie[
+            (df_pie["latitude"] >= region["lat_min"]) &
+            (df_pie["latitude"] <= region["lat_max"]) &
+            (df_pie["longitude"] >= region["lon_min"]) &
+            (df_pie["longitude"] <= region["lon_max"])
+        ]
+
+    # Filter by parameter
+    if selected_parameter != "All":
+        df_pie = df_pie[df_pie["parameter"] == selected_parameter]
+
+    # Ensure x_axis exists in df_pie
+    if x_axis not in df_pie.columns:
+        st.warning(f"Column {x_axis} not found in data. Using 'parameter' instead.")
+        x_axis = "parameter"
+
+    # Aggregate counts
+    counts = df_pie[x_axis].value_counts().reset_index()
     counts.columns = [x_axis, "count"]
-    fig = px.pie(counts, names=x_axis, values="count")
+
+    fig = px.pie(
+        counts,
+        names=x_axis,
+        values="count",
+        title=f"Distribution of {x_axis}"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
 # Pollution Map
 # --------------------------------------------------
 elif chart_type == "Pollution Map":
-    min_date = df["date"].min()
-    max_date = df["date"].max()
+    if selected_parameter != "All":
+        allowed_keys = param[param["parameter"] == selected_parameter]["parameter_key"]
+        fact_filtered = fact[fact["parameter_key"].isin(allowed_keys)]
+    else:
+        fact_filtered = fact
+    df_map = fact_filtered.merge(site[["site_key", "sitename", "latitude", "longitude"]], on="site_key")
+    df_map = df_map.merge(date[["date_key", "date", "hour"]], on="date_key")
+    # with st.expander("show df_map"):
+    #     st.dataframe(df_map)
+    
+    min_date = df_map["date"].min()
+    max_date = df_map["date"].max()
     selected_date = st.sidebar.date_input(
         "Date",
         value=min_date,
@@ -205,13 +286,24 @@ elif chart_type == "Pollution Map":
 
     selected_hour = st.sidebar.slider("Hour (UTC)", 0, 23, 0)
 
-    df_map = df[
-        (df["date"] == selected_date) &
-        (df["hour"] == selected_hour)
+    df_map = df_map[
+        (df_map["date"] == selected_date) &
+        (df_map["hour"] == selected_hour)
     ].groupby(
         ["sitename", "latitude", "longitude"],
         as_index=False
     )["aqi"].mean()
+
+
+    # Filter by region
+    if selected_region != "All":
+        region = US_REGIONS[selected_region]
+        df_line = df_map[
+            (df_map["latitude"] >= region["lat_min"]) &
+            (df_map["latitude"] <= region["lat_max"]) &
+            (df_map["longitude"] >= region["lon_min"]) &
+            (df_map["longitude"] <= region["lon_max"])
+        ]
 
     aqi_colorscale = [
         # Good (0–50)
@@ -274,27 +366,17 @@ elif chart_type == "Pollution Map":
     fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
-# --------------------------------------------------
-# Heatmap
-# --------------------------------------------------
-elif chart_type == "Heatmap":
-    heat_df = (
-        df
-        .groupby([x_axis, y_axis], as_index=False)["aqi"]
-        .mean()
-    )
-
-    fig = px.density_heatmap(
-        heat_df,
-        x=x_axis,
-        y=y_axis,
-        z="aqi",
-        color_continuous_scale="Viridis"
-    )
-    st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
 # Data preview
 # --------------------------------------------------
-with st.expander("Show raw data"):
-    st.dataframe(df)
+with st.expander("Show fact data"):
+    st.dataframe(fact)
+with st.expander("Show site data"):
+    st.dataframe(site)
+with st.expander("Show param data"):
+    st.dataframe(param)
+with st.expander("Show data date"):
+    st.dataframe(date)
+with st.expander("Show category data"):
+    st.dataframe(category)
