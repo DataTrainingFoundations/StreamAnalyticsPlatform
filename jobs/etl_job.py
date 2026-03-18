@@ -32,17 +32,17 @@ def get_partition_dates(prefix):
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
             region_name="us-east-1",
         )
-        if dev != "1"
-        else boto3.client(
-            "s3",
-            endpoint_url=(
-                os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT")
-            ),
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+        # if dev != "1"
+        # else boto3.client(
+        #     "s3",
+        #     endpoint_url=(
+        #         os.getenv("DOCKER_MINIO_ENDPOINT")
+        #         if docker_env == "1"
+        #         else os.getenv("LOCAL_MINIO_ENDPOINT")
+        #     ),
+        #     aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+        #     aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        # )
     )
     paginator = s3_client.get_paginator("list_objects_v2")
     dates = set()
@@ -149,13 +149,12 @@ def silver_to_gold():
 
     Currently a placeholder - shows the data for inspection.
     """
+    if dev == "1":
+        print("\n\nRunning gold transformation\n\n")
     # Create or retrieve the Spark session
     spark = get_or_create_session()
     # Read cleaned Parquet data from the silver layer
     silver_df = spark.read.parquet("s3a://stream-analytics-project-bucket/silver/airnow_clean")
-    # Display the data for inspection (temporary)
-    #silver_df.show()
-    # TODO: Implement aggregation logic to create fact and dimension tables
     #create table for monitoring sites
     dim_site = silver_df.select(
         "intlaqscode",
