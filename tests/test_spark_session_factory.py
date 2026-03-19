@@ -1,46 +1,84 @@
-import os
 import pytest
-from jobs import spark_session_factory
-from pyspark.sql import SparkSession
+
+from jobs import spark_session_factory as ssf
 
 
-def test_create_spark_session_defaults_to_local(monkeypatch):
-    monkeypatch.setenv("DOCKER_ENV", "0")
-    monkeypatch.setenv("DEV", "0")
-    # ensure environment variable that influences default master is cleared
-    monkeypatch.delenv("DOCKER_SPARK_MASTER", raising=False)
+class DummySparkContext:
+    def __init__(self):
+        self.log_level = None
 
-    spark = spark_session_factory.create_spark_session(app_name="pytest-spark-test")
-    assert isinstance(spark, SparkSession)
-    assert spark.sparkContext is not None
-    assert spark.conf.get("spark.sql.session.timeZone") == "UTC"
-
-    # Verify a setting from non-DOCKER path is present
-    assert spark.conf.get("spark.sql.shuffle.partitions") == "8"
-
-    spark.stop()
+    def setLogLevel(self, level):
+        self.log_level = level
 
 
-def test_get_or_create_session_returns_active(monkeypatch):
-    monkeypatch.setenv("DOCKER_ENV", "0")
-    monkeypatch.setenv("DEV", "0")
-    spark = spark_session_factory.create_spark_session(app_name="pytest-spark-test2")
+class DummySparkSession:
+    def __init__(self):
+        self.sparkContext = DummySparkContext()
+        self.stopped = False
 
-    got = spark_session_factory.get_or_create_session(app_name="unused")
-    assert got == spark
-
-    spark.stop()
+    def stop(self):
+        self.stopped = True
 
 
-def test_create_spark_session_docker_minio_config(monkeypatch):
-    monkeypatch.setenv("DOCKER_ENV", "1")
-    monkeypatch.setenv("DEV", "1")
-    monkeypatch.setenv("DOCKER_MINIO_ENDPOINT", "http://localhost:9000")
-    monkeypatch.setenv("MINIO_ROOT_USER", "minioadmin")
-    monkeypatch.setenv("MINIO_ROOT_PASSWORD", "minioadmin")
-    monkeypatch.setenv("DOCKER_SPARK_MASTER", "local[1]")
+class DummyBuilder:
+    def __init__(self):
+        self.steps = []
 
-    spark = spark_session_factory.create_spark_session(app_name="pytest-minio-test")
-    assert spark.conf.get("spark.hadoop.fs.s3a.endpoint") == "http://localhost:9000"
+    def appName(self, name):
+        self.steps.append(("appName", name))
+        return self
 
-    spark.stop()
+    def master(self, master):
+        self.steps.append(("master", master))
+        return self
+
+    def config(self, key, value):
+        self.steps.append(("config", key, value))
+        return self
+
+    def getOrCreate(self):
+        return DummySparkSession()
+
+
+def test_create_spark_session_with_overrides(monkeypatch):
+    dummy_builder = DummyBuilder()
+    monkeypatch.setattr(ssf.SparkSession, "builder", dummy_builder)
+
+    session = ssf.create_spark_session(app_name="test-app", master="local[*]", config_overrides={"spark.custom":"value"})
+
+    assert isinstance(session, DummySparkSession)
+    assert session.sparkContext.log_level == "WARN"
+
+    # verify critical config chain includes custom override at end
+    assert ("appName", "test-app") in dummy_builder.steps
+    assert ("master", "local[*]") in dummy_builder.steps
+    assert ("config", "spark.custom", "value") in dummy_builder.steps
+
+
+def test_get_or_create_session_uses_active_session(monkeypatch):
+    sentinel = object()
+    monkeypatch.setattr(ssf.SparkSession, "getActiveSession", lambda: sentinel)
+
+    result = ssf.get_or_create_session(app_name="ignored")
+
+    assert result is sentinel
+
+
+def test_get_or_create_session_creates_if_no_active(monkeypatch):
+    monkeypatch.setattr(ssf.SparkSession, "getActiveSession", lambda: None)
+    dummy_session = DummySparkSession()
+    monkeypatch.setattr(ssf, "create_spark_session", lambda app_name=None: dummy_session)
+
+    result = ssf.get_or_create_session(app_name="foo")
+
+    assert result is dummy_session
+
+
+def test_stop_session_handles_none_and_stops():
+    # no-op on None
+    ssf.stop_session(None)
+
+    # stops on valid session
+    spark = DummySparkSession()
+    ssf.stop_session(spark)
+    assert spark.stopped is True

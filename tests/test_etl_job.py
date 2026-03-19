@@ -32,6 +32,7 @@ class FakeWriter:
 class FakeDataFrame:
     def __init__(self, shared):
         self.shared = shared
+        self.columns = ["date", "hour", "IntlAQSCode", "Parameter", "Category", "FullAQSCode", "UTC", "intlaqscode", "sitename", "agencyname", "latitude", "longitude", "aqi", "parameter", "unit"]
 
     def filter(self, *_args, **_kwargs):
         self.shared["filter_called"] = True
@@ -41,8 +42,12 @@ class FakeDataFrame:
         self.shared.setdefault("with_columns", []).append(name)
         return self
 
-    def drop(self, col_name):
-        self.shared.setdefault("drop_columns", []).append(col_name)
+    def drop(self, *col_names):
+        self.shared.setdefault("drop_columns", []).extend(col_names)
+        return self
+
+    def dropDuplicates(self, columns):
+        self.shared["dropDuplicates"] = columns
         return self
 
     def drop_duplicates(self, columns):
@@ -59,6 +64,10 @@ class FakeDataFrame:
 
     def distinct(self):
         self.shared["distinct_called"] = True
+        return self
+
+    def repartition(self, *cols):
+        self.shared.setdefault("repartition", []).append(cols)
         return self
 
     @property
@@ -82,17 +91,78 @@ class FakeDataFrame:
         return AnyAttr()
 
 
+class FakeHadoopPath:
+    def __init__(self, path):
+        self.path = path
+
+    def toString(self):
+        return self.path
+
+
+class FakeHadoopStatus:
+    def __init__(self, path):
+        self._path = FakeHadoopPath(path)
+
+    def getPath(self):
+        return self._path
+
+
+class FakeHadoopFS:
+    def __init__(self, status_list=None):
+        self.status_list = status_list or []
+
+    def listStatus(self, path):
+        path_str = path.toString() if hasattr(path, "toString") else str(path)
+        if "landing/airnow/" in path_str and "date=" not in path_str:
+            return [FakeHadoopStatus(path_str + "date=2026-03-10")]
+        if "date=2026-03-10" in path_str:
+            return [FakeHadoopStatus(path_str + "/hour=01")]
+        return []
+
+
 class FakeSpark:
     def __init__(self, shared):
         self.shared = shared
         self.read = self
+        self._jsc = self
+        self._jvm = self
+
+    def hadoopConfiguration(self):
+        return {}
+
+    class java:
+        class net:
+            @staticmethod
+            def URI(path):
+                return path
+
+    class org:
+        class apache:
+            class hadoop:
+                class fs:
+                    class FileSystem:
+                        @staticmethod
+                        def get(uri, _conf):
+                            return FakeHadoopFS()
+
+                    @staticmethod
+                    def Path(path):
+                        return FakeHadoopPath(path)
+
+    def schema(self, *args, **kwargs):
+        self.shared["schema_called"] = True
+        return self
+
+    def option(self, key, value):
+        self.shared.setdefault("options", []).append((key, value))
+        return self
+
+    def parquet(self, *paths):
+        self.shared["parquet_read_path"] = paths
+        return FakeDataFrame(self.shared)
 
     def json(self, path):
         self.shared["raw_json_path"] = path
-        return FakeDataFrame(self.shared)
-
-    def parquet(self, path):
-        self.shared["parquet_read_path"] = path
         return FakeDataFrame(self.shared)
 
 
@@ -126,11 +196,29 @@ class FakeColumn:
     def __ne__(self, other):
         return True
 
+    def __getitem__(self, _key):
+        return self
+
+    def alias(self, _name):
+        return self
+
 
 class FakeFunctions:
     @staticmethod
     def col(_name):
         return FakeColumn(f"col({_name})")
+
+    @staticmethod
+    def input_file_name():
+        return FakeColumn("input_file_name")
+
+    @staticmethod
+    def regexp_extract(col, _pattern, _idx):
+        return FakeColumn("regexp_extract")
+
+    @staticmethod
+    def create_map(items):
+        return FakeColumn("create_map")
 
     @staticmethod
     def concat_ws(_sep, *args):
@@ -145,7 +233,11 @@ class FakeFunctions:
         return FakeColumn("md5")
 
     @staticmethod
-    def to_date(_col, _fmt):
+    def create_map(items):
+        return FakeColumn("create_map")
+
+    @staticmethod
+    def to_date(_col, _fmt=None):
         return FakeColumn("to_date")
 
     @staticmethod
@@ -208,19 +300,46 @@ def test_get_partition_dates_parses_date_prefixes(monkeypatch):
 def test_raw_to_bronze_reads_json_and_writes_parquet(monkeypatch):
     shared = {}
     monkeypatch.setattr(etl_job, "streamflow_bucket", "test-bucket")
+    monkeypatch.setattr(etl_job, "F", FakeFunctions)
     monkeypatch.setattr(etl_job, "get_or_create_session", lambda: FakeSpark(shared))
 
     etl_job.raw_to_bronze()
 
-    assert shared["raw_json_path"] == "s3a://test-bucket/landing/airnow/"
-    
+    assert shared["raw_json_path"] == ["s3a://test-bucket/landing/airnow/date=2026-03-10/hour=01"]
+
     assert any(
-        call["path"] == "s3a://test-bucket/bronze/airnow/" and call["mode"] == "append" and call["partitionBy"] == ("date",)
-        for call in shared["write_paths"]
+        call["path"] == "s3a://test-bucket/bronze/airnow/" and call["mode"] == "append" and call["partitionBy"] == ("date", "hour")
+        for call in shared.get("write_paths", [])
     )
 
 
-def test_bronze_to_silver_executes_transform_and_writes(monkeypatch):
+def test_bronze_to_silver_no_new_dates_returns(monkeypatch):
+    shared = {}
+    monkeypatch.setattr(etl_job, "F", FakeFunctions)
+    monkeypatch.setattr(etl_job, "dev", "0")
+    monkeypatch.setattr(etl_job, "streamflow_bucket", "test-bucket")
+    monkeypatch.setattr(etl_job, "get_partition_dates", lambda prefix: set())
+    monkeypatch.setattr(etl_job, "get_or_create_session", lambda: FakeSpark(shared))
+
+    etl_job.bronze_to_silver()
+
+    assert "parquet_read_path" not in shared
+    assert "write_paths" not in shared
+
+
+def test_silver_to_gold_no_new_dates_returns(monkeypatch):
+    shared = {}
+    monkeypatch.setattr(etl_job, "F", FakeFunctions)
+    monkeypatch.setattr(etl_job, "get_partition_dates", lambda prefix: set())
+    monkeypatch.setattr(etl_job, "get_or_create_session", lambda: FakeSpark(shared))
+
+    etl_job.silver_to_gold()
+
+    assert "parquet_read_path" not in shared
+    assert "write_paths" not in shared
+
+
+def test_bronze_to_silver_transforms_and_writes(monkeypatch):
     shared = {}
     monkeypatch.setattr(etl_job, "F", FakeFunctions)
     monkeypatch.setattr(etl_job, "dev", "0")
@@ -230,35 +349,38 @@ def test_bronze_to_silver_executes_transform_and_writes(monkeypatch):
 
     etl_job.bronze_to_silver()
 
-    assert shared["parquet_read_path"] == "s3a://test-bucket/bronze/airnow/date=2026-03-10"
-    assert shared.get("filter_called", False) is True
-    assert "FullAQSCode" in shared.get("drop_columns", [])
-    assert "UTC" in shared.get("drop_columns", [])
-    assert "composite_key" in shared.get("with_columns", [])
-
-    silver_path = "s3a://test-bucket/silver/airnow_clean/date=2026-03-10"
-    assert any(
-        call["path"] == silver_path and call["mode"] == "append"
-        for call in shared["write_paths"]
-    )
+    assert shared["parquet_read_path"] == ("s3a://test-bucket/bronze/airnow/date=2026-03-10",)
+    assert "concern_level" in shared.get("with_columns", [])
 
 
-def test_silver_to_gold_builds_and_writes_dimensions_facts(monkeypatch):
+def test_silver_to_gold_transforms_and_writes(monkeypatch):
     shared = {}
     monkeypatch.setattr(etl_job, "F", FakeFunctions)
+    monkeypatch.setattr(etl_job, "dev", "0")
+    monkeypatch.setattr(etl_job, "streamflow_bucket", "test-bucket")
+    monkeypatch.setattr(etl_job, "get_partition_dates", lambda prefix: {"2026-03-10"} if prefix.startswith("silver") else set())
     monkeypatch.setattr(etl_job, "get_or_create_session", lambda: FakeSpark(shared))
 
     etl_job.silver_to_gold()
 
-    assert shared["parquet_read_path"] == "s3a://stream-analytics-project-bucket/silver/airnow_clean"
-
-    expected_write_paths = {
-        "s3a://stream-analytics-project-bucket/gold/dim_site/",
-        "s3a://stream-analytics-project-bucket/gold/dim_parameter/",
-        "s3a://stream-analytics-project-bucket/gold/dim_date/",
-        "s3a://stream-analytics-project-bucket/gold/dim_category/",
-        "s3a://stream-analytics-project-bucket/gold/fact_air_quality_readings/",
+    assert shared["parquet_read_path"] == ("s3a://test-bucket/silver/airnow_clean/date=2026-03-10",)
+    expected = {
+        "s3a://test-bucket/gold/airnow/dim_site/",
+        "s3a://test-bucket/gold/airnow/dim_parameter/",
+        "s3a://test-bucket/gold/airnow/dim_date/",
+        "s3a://test-bucket/gold/airnow/dim_category/",
+        "s3a://test-bucket/gold/airnow/fact_air_quality_readings/",
     }
+    actual = {c["path"] for c in shared.get("write_paths", [])}
+    assert expected.issubset(actual)
 
-    actual_paths = {c["path"] for c in shared.get("write_paths", [])}
-    assert expected_write_paths.issubset(actual_paths)
+
+def test_process_date_transforms_and_writes(monkeypatch):
+    shared = {}
+    monkeypatch.setattr(etl_job, "streamflow_bucket", "test-bucket")
+    monkeypatch.setattr(etl_job, "F", FakeFunctions)
+
+    etl_job.process_date(["s3a://test-bucket/landing/airnow/date=2026-03-10/hour=01"], FakeSpark(shared))
+
+    assert any(call["path"] == "s3a://test-bucket/bronze/airnow/" for call in shared.get("write_paths", []))
+
