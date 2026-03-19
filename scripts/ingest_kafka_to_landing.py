@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime
 from collections import defaultdict
 import boto3
+from botocore.exceptions import ClientError
 from kafka import KafkaConsumer
 from dotenv import load_dotenv
 from util import constants
@@ -20,6 +21,50 @@ from util import constants
 load_dotenv()
 
 dev = os.getenv("DEV")
+
+
+def ensure_bucket_exists(s3_client, bucket_name: str):
+    """Create the bucket if it does not already exist."""
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code not in {"404", "NoSuchBucket"}:
+            raise
+        s3_client.create_bucket(Bucket=bucket_name)
+        print(f"Created bucket: {bucket_name}")
+
+
+def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
+    """Write buffered records to storage and clear the in-memory partitions."""
+    total_records_written = 0
+
+    for date, hour_partitions in buffered_partitions.items():
+        date_partition = f"landing/airnow/date={date}"
+        for hour, partition_records in hour_partitions.items():
+            if not partition_records:
+                continue
+
+            key = f"{date_partition}/hour={hour}/{uuid.uuid4()}.json"
+            payload = "\n".join(
+                json.dumps(record, separators=(",", ":"))
+                for record in partition_records
+            ).encode("utf-8")
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=key,
+                Body=payload,
+            )
+            total_records_written += len(partition_records)
+
+        if dev == "1" and hour_partitions:
+            print(
+                f"Wrote {sum(len(records) for records in hour_partitions.values())} records to {date_partition}"
+            )
+
+    buffered_partitions.clear()
+    return total_records_written
+
 
 def consume_data(kafka_topic: str, is_historic: bool = True):
     """
@@ -61,41 +106,35 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
         kafka_topic,
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
-        group_id="minio_writer_group",
-        enable_auto_commit=True,
+        group_id="aws_s3_writer_group",
+        enable_auto_commit=False,
+        key_deserializer=lambda k: k.decode(),
         value_deserializer=lambda v: json.loads(v.decode()),
+        max_poll_records=int(
+            os.getenv("KAFKA_CONSUMER_MAX_POLL_RECORDS", "2500")
+        ),  # batch size
+        fetch_max_wait_ms=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MAX_WAIT_MS", "500")
+        ),  # wait for batching
+        fetch_min_bytes=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MIN_BYTES", "1024")
+        ),  # don't fetch tiny payloads
     )
 
     # -----------------------------
     # Setup MinIO client
     # -----------------------------
-    s3_client = (
-        boto3.client(
-            "s3",
-            aws_access_key_id=os.getenv("AWS_USER"),
-            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-            region_name=os.getenv("AWS_REGION_NAME"),
-        )
-        if dev != "1"
-        else boto3.client(
-            "s3",
-            endpoint_url=(
-                os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT")
-            ),
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=os.getenv("AWS_USER"),
+        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+        region_name="us-east-1",
     )
 
-    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
+    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET", "")
 
     # Create bucket, if nonexistent
-    existing_buckets = [b["Name"] for b in s3_client.list_buckets()["Buckets"]]
-    if streamflow_bucket not in existing_buckets:
-        s3_client.create_bucket(Bucket=streamflow_bucket)
-        print(f"Created bucket: {streamflow_bucket}")
+    ensure_bucket_exists(s3_client, streamflow_bucket)
 
     # -----------------------------
     # Start consuming messages
@@ -103,16 +142,22 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
     last_message_time = time.time()
     if dev == "1":
         print("Starting Kafka consumption...")
-    oldest_date_ingested = datetime.now()
+    oldest_date_ingested = None
+    buffered_partitions = defaultdict(lambda: defaultdict(list))
+    buffered_record_count = 0
+    flush_record_count = int(os.getenv("LANDING_FLUSH_RECORD_COUNT", "25000"))
+    max_wait_time = int(os.getenv("MAX_KAFKA_CONSUMER_IDLE_TIME", "30"))
+
     while True:
         if dev == "1":
             print("Getting records from Kafka topic")
         records = consumer.poll(timeout_ms=1000)
 
-
         if not records:
             # Exit if no messages arrive for a while
-            if time.time() - last_message_time > constants.MAX_KAFKA_CONSUMER_IDLE_TIME:
+            if time.time() - last_message_time > max_wait_time:
+                if buffered_record_count:
+                    flush_partitions(s3_client, streamflow_bucket, buffered_partitions)
                 if dev == "1":
                     print("No new messages detected. Exiting consumer.")
                 break
@@ -126,57 +171,57 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
         messages = [msg.value for msgs in records.values() for msg in msgs]
 
         # -----------------------------
-        # Group by date/hour partitions"
+        # Buffer date/hour partitions and flush larger batches to storage.
         # -----------------------------
         if dev == "1":
             print("Creating partitions for bucket insert")
-        date_partitions = defaultdict(lambda: defaultdict(list))
         for record in messages:
-            oldest_date_ingested = min(
-                oldest_date_ingested,
-                datetime.strptime(record["UTC"], constants.AIRNOW_UTC_DATE_FORMAT)
+            record_utc = datetime.strptime(
+                record["UTC"], constants.AIRNOW_UTC_DATE_FORMAT
+            )
+            oldest_date_ingested = (
+                record_utc
+                if oldest_date_ingested is None
+                else min(oldest_date_ingested, record_utc)
             )
             date, hour = record["UTC"].split("T")
             hour = hour[:2]  # Keep only hour and drop minutes
-            date_partitions[date][hour].append(record)
+            buffered_partitions[date][hour].append(record)
 
-        # -----------------------------
-        # Write files per date/hour
-        # -----------------------------
-        for date, hour_partitions in date_partitions.items():
-            date_partition = f"landing/airnow/date={date}"
-            for hour, records in hour_partitions.items():
-                key = f"landing/airnow/date={date}/hour={hour}/{uuid.uuid4()}.json"
-                s3_client.put_object(
-                    Bucket=streamflow_bucket,
-                    Key=key,
-                    Body="\n".join(json.dumps(r) for r in records).encode(),
-                )
-            if dev == "1":
-                print(f"Wrote {len(hour_partitions)} records to {date_partition}")
+        buffered_record_count += len(messages)
 
-    if is_historic:
+        if buffered_record_count >= flush_record_count:
+            flush_partitions(
+                s3_client,
+                streamflow_bucket,
+                buffered_partitions,
+            )
+            buffered_record_count = 0
+            consumer.commit()
+
+    if is_historic and oldest_date_ingested is not None:
         # Update streamflow metadata file with new oldest_date
-        body = json.dumps({
-            "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT),
-            "ingested_at": datetime.now().isoformat()
-        })
+        body = json.dumps(
+            {
+                "oldest_loaded_date": oldest_date_ingested.strftime(
+                    constants.AIRNOW_UTC_DATE_FORMAT
+                ),
+                "ingested_at": datetime.now().isoformat(),
+            }
+        )
 
         progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
         if progress_key:
             if dev == "1":
                 print("Creating/Updating streamflow metadata json file in s3 bucket")
-            s3_client.put_object(
-                Bucket=streamflow_bucket,
-                Key=progress_key,
-                Body=body
-            )
+            s3_client.put_object(Bucket=streamflow_bucket, Key=progress_key, Body=body)
         else:
             raise ValueError("Missing streamflow bucket progress key value")
 
     consumer.close()
     if dev == "1":
         print("Kafka ingestion complete.")
+
 
 if __name__ == "__main__":
     while True:
