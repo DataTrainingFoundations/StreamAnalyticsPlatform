@@ -81,7 +81,7 @@ def get_oldest_record_date():
 
 def get_times(oldest_date_time: datetime | None = None):
     """
-    Returns start and end datetimes (as strings) for fetching a full month of historical data.
+    Returns start and end datetimes (as strings) for fetching 2 weeks of historical data.
 
     If oldest_date_time is None, checks the warehouse to find the oldest record.
     If no records exist, defaults to the previous month from today.
@@ -217,20 +217,66 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
     )
     producer = KafkaProducer(
         bootstrap_servers=bootstrap_server,
+        key_serializer=lambda k: k.encode(),
         value_serializer=lambda v: json.dumps(v).encode(),
+
+        acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
+        enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
+        retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
+
+        linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "25")),
+        batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "65536")),
     )
     for record in records:
-        # record["ingested_at"] = datetime.now().isoformat()
-        message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
         producer.send(
             kafka_topic,
-            key=message_key.encode(),
+            key=f"{record['IntlAQSCode']}_{record['Parameter']}",
             value=record,
         )
 
     producer.flush()
     if dev == "1":
         print("Batch sent.")
+
+def fetch_current_data(bbox):
+    """
+    Fetches current air quality data from the AirNow API for the current hour and bounding box.
+
+    Args:
+        bbox (str): Bounding box coordinates as a comma-separated string 
+        (e.g., "lat1,lng1,lat2,lng2").
+
+    Returns:
+        list: List of air quality measurement records from the API.
+
+    Raises:
+        ValueError: If required environment variables (API key or URL) are missing.
+        requests.RequestException: If the API request fails.
+
+    Environment Variables:
+        - AIRNOW_API_KEY: API key for AirNow API access
+        - AIRNOW_DATA_URL: Base URL for AirNow data API
+    """
+    api_key = os.getenv("AIRNOW_API_KEY", "")
+    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
+
+    if api_key == "":
+        raise ValueError("Missing API key")
+    if airnow_url == "":
+        raise ValueError("Missing airnow url")
+
+    params = {
+        "parameters": constants.POLLUTANTS,
+        "BBOX": bbox,
+        "dataType": "A",
+        "format": "application/json",
+        "verbose": 1,
+        "API_KEY": api_key,
+    }
+    if dev == "1":
+        print("Returning fetched airnow data")
+    return requests.get(airnow_url, params=params, timeout=300).json()
+
 
 
 def run_historic_producer():
@@ -241,20 +287,31 @@ def run_historic_producer():
     and publishes to Kafka. This is primarily for testing and development.
     """
     start, end = get_times()
-    # i = 0
     for bbox in constants.BBOXES:
         try:
-            # if i == 5 and dev == "1":
-            #     break
             records = fetch_historic_data(start, end, bbox)
             publish_raw_historical_records(
                 records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
             )
-            # i += 1
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
 
+def run_current_producer():
+    """
+    Main function for running the current producer locally.
+
+    Fetches current hour data across all bounding boxes
+    and publishes to Kafka. This is primarily for testing and development.
+    """
+    
+    for bbox in constants.BBOXES:
+        try:
+            records = fetch_current_data(bbox)
+            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+        except Exception as e:
+            print(f"Failed at {bbox} for time period {datetime.now()}")
+            print("Failure due to the following error:\n", e)
 
 if __name__ == "__main__":
     while True:
@@ -270,7 +327,7 @@ if __name__ == "__main__":
                 run_historic_producer()
                 break
             case "2":
-                # current producer function call goes here
+                run_current_producer()
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")

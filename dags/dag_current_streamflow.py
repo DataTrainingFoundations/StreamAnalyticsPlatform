@@ -8,14 +8,10 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from airflow import DAG
-from airflow.models import DagModel
-from airflow.operators.python import PythonOperator, BranchPythonOperator
-from airflow.utils.session import provide_session
+from airflow.operators.python import PythonOperator
 from util import constants
 from scripts.airnow_raw_producers import (
-    get_oldest_record_date,
-    get_times,
-    fetch_historic_data,
+    fetch_current_data,
     publish_raw_historical_records
 )
 from scripts.ingest_kafka_to_landing import (
@@ -32,38 +28,11 @@ load_dotenv()
 
 DEV = os.getenv("DEV", "")
 
-def decide_ingestion(**context):
+def produce_current_data(**context):
     """
-    Determine whether to continue data ingestion based on the oldest record date.
+    Execute the AirNow data producer to fetch and publish current air quality data.
 
-    This function retrieves the oldest record date from the data source and 
-    compares it to a target date.
-    If the oldest record is older than or equal to the target date, the pipeline 
-    is stopped; otherwise, data ingestion continues.
-    The oldest date is pushed to XCom for downstream tasks.
-
-    Args:
-        **context: Airflow context dictionary, expected to contain 'ti' 
-        (TaskInstance) for XCom operations.
-
-    Returns:
-        str: "stop_pipeline" if the oldest record date is less than or 
-            equal to the target date, "ingest_data" otherwise.
-    """
-    oldest = get_oldest_record_date()
-
-    if oldest:
-        # push value to XCom
-        context["ti"].xcom_push(key="oldest_date", value=oldest)
-        if oldest <= datetime.strptime(constants.TARGET_DATE, constants.AIRNOW_UTC_DATE_FORMAT):
-            return "stop_pipeline"
-    return "produce_raw_data_to_kafka"
-
-def produce_historical_data(**context):
-    """
-    Execute the AirNow data producer to fetch and publish historical air quality data.
-
-    This function fetches historical air quality data for the previous month from multiple
+    This function fetches the air quality data for the current hour from multiple
     bounding boxes (limited to first 5 for testing) and publishes the records to Kafka.
     It's designed to be called as an Airflow task.
 
@@ -77,36 +46,25 @@ def produce_historical_data(**context):
         Exception: If data fetching or publishing fails for any bounding box.
     """
     ti = context["ti"]
-    oldest_date = ti.xcom_pull(
-        task_ids="branch_decision",
-        key="oldest_date"
-    )
-    start, end = get_times(oldest_date)
+        
+    i = 0
     for bbox in constants.BBOXES:
         try:
-            records = fetch_historic_data(start, end, bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
-            print(f"✓ Published {len(records)} records to Kafka")
+            if i == 5 and DEV == "1":
+                break
+            records = fetch_current_data(bbox)
+            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+            print(f"Published {len(records)} records to Kafka")
+            i += 1
         except Exception as e:
             print(
-                f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
+                f"Producer failed at {bbox} for time period {datetime.now()}: {str(e)}"
             )
             raise
 
-@provide_session
-def pause_this_dag(dag_id, session=None):
+def archive_raw_current_data():
     """
-    Pauses DAG
-    """
-    this_dag = session.query(DagModel).filter( # type: ignore
-        DagModel.dag_id == dag_id
-    ).first()
-
-    this_dag.is_paused = True
-
-def archive_raw_historic_data():
-    """
-    Archives processed raw historic airnow data
+    Archives processed raw current airnow data
     """
     archive_prefix = os.getenv("STREAMFLOW_BUCKET_ARCHIVE_PREFIX")
     landing_prefix = os.getenv("STREAMFLOW_BUCKET_LANDING_PREFIX")
@@ -125,9 +83,9 @@ default_args = {
 
 # Define the DAG with its configuration
 with DAG(
-    dag_id="streamflow_historic",
+    dag_id="streamflow_current",
     default_args=default_args,
-    description="StreamFlow historic airnow data pipeline: produce -> consume -> transform -> archive",
+    description="StreamFlow current airnow data pipeline: produce -> consume -> transform -> archive",
     start_date=datetime(2026, 3, 18),
     schedule="@hourly",
     max_active_runs=1,
@@ -135,30 +93,17 @@ with DAG(
     tags=["streamflow", "etl"],
 ) as dag:
 
-    # Task 1: Check oldest date in warehouse
-    check_date = BranchPythonOperator(
-        task_id="branch_decision",
-        python_callable=decide_ingestion,
-    )
-
-    # Task 2a: Produce raw data from AirNow API to Kafka if oldest date is acceptable
+    # Task 1: Produce raw data from AirNow API to Kafka if oldest date is acceptable
     produce_raw_data = PythonOperator(
         task_id="produce_raw_data_to_kafka",
-        python_callable=produce_historical_data,
-        doc="Fetch historical air quality data from AirNow API and publish to Kafka",
+        python_callable=produce_current_data,
+        doc="Fetch current air quality data from AirNow API and publish to Kafka",
     )
 
-    # Task 2b: Stop DAG if oldest date is at the limit for our desired data
-    stop = PythonOperator(
-        task_id="stop_pipeline",
-        python_callable=lambda: pause_this_dag("streamflow_historic"),
-        doc="Pause the DAG once all desired historical data has been ingested"
-    )
-
-    # Task 3: Consume Kafka messages and write to landing zone (MinIO)
+    # Task 2: Consume Kafka messages and write to landing zone (MinIO)
     ingest_to_landing = PythonOperator(
         task_id="ingest_raw_data_to_warehouse",
-        python_callable=lambda: consume_data(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")),
+        python_callable=lambda: consume_data(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")),
         doc="Consume from Kafka topic and write batch to MinIO landing zone",
     )
 
@@ -186,13 +131,11 @@ with DAG(
     # Task 7: Archive processed raw data
     archive_raw_data = PythonOperator(
         task_id="archive_raw_data",
-        python_callable=archive_raw_historic_data,
-        doc="Archive processed raw historic data"
+        python_callable=archive_raw_current_data,
+        doc="Archive processed raw current data"
     )
 
     # Set task dependencies: execute tasks sequentially
-
-    check_date >> [produce_raw_data, stop]
 
     produce_raw_data >> \
         ingest_to_landing >> \

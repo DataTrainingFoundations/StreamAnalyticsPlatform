@@ -22,6 +22,7 @@ load_dotenv()
 
 dev = os.getenv("DEV")
 
+
 def ensure_bucket_exists(s3_client, bucket_name: str):
     """Create the bucket if it does not already exist."""
     try:
@@ -57,7 +58,9 @@ def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
             total_records_written += len(partition_records)
 
         if dev == "1" and hour_partitions:
-            print(f"Wrote {sum(len(records) for records in hour_partitions.values())} records to {date_partition}")
+            print(
+                f"Wrote {sum(len(records) for records in hour_partitions.values())} records to {date_partition}"
+            )
 
     buffered_partitions.clear()
     return total_records_written
@@ -103,35 +106,32 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
         kafka_topic,
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
-        group_id="minio_writer_group",
-        enable_auto_commit=True,
+        group_id="aws_s3_writer_group",
+        enable_auto_commit=False,
+        key_deserializer=lambda k: k.decode(),
         value_deserializer=lambda v: json.loads(v.decode()),
+        max_poll_records=int(
+            os.getenv("KAFKA_CONSUMER_MAX_POLL_RECORDS", "2500")
+        ),  # batch size
+        fetch_max_wait_ms=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MAX_WAIT_MS", "500")
+        ),  # wait for batching
+        fetch_min_bytes=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MIN_BYTES", "1024")
+        ),  # don't fetch tiny payloads
     )
 
     # -----------------------------
     # Setup MinIO client
     # -----------------------------
-    s3_client = (
-        boto3.client(
-            "s3",
-            aws_access_key_id=os.getenv("AWS_USER"),
-            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-            region_name="us-east-1",
-        )
-        if dev != "1"
-        else boto3.client(
-            "s3",
-            endpoint_url=(
-                os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT")
-            ),
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=os.getenv("AWS_USER"),
+        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+        region_name="us-east-1",
     )
 
-    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET","")
+    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET", "")
 
     # Create bucket, if nonexistent
     ensure_bucket_exists(s3_client, streamflow_bucket)
@@ -145,17 +145,13 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
     oldest_date_ingested = None
     buffered_partitions = defaultdict(lambda: defaultdict(list))
     buffered_record_count = 0
-    flush_record_count = int(
-        os.getenv("LANDING_FLUSH_RECORD_COUNT","")
-    )
-
-    max_wait_time = int(os.getenv("MAX_KAFKA_CONSUMER_IDLE_TIME",""))
+    flush_record_count = int(os.getenv("LANDING_FLUSH_RECORD_COUNT", "25000"))
+    max_wait_time = int(os.getenv("MAX_KAFKA_CONSUMER_IDLE_TIME", "30"))
 
     while True:
         if dev == "1":
             print("Getting records from Kafka topic")
         records = consumer.poll(timeout_ms=1000)
-
 
         if not records:
             # Exit if no messages arrive for a while
@@ -201,29 +197,31 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
                 buffered_partitions,
             )
             buffered_record_count = 0
+            consumer.commit()
 
     if is_historic and oldest_date_ingested is not None:
         # Update streamflow metadata file with new oldest_date
-        body = json.dumps({
-            "oldest_loaded_date": oldest_date_ingested.strftime(constants.AIRNOW_UTC_DATE_FORMAT),
-            "ingested_at": datetime.now().isoformat()
-        })
+        body = json.dumps(
+            {
+                "oldest_loaded_date": oldest_date_ingested.strftime(
+                    constants.AIRNOW_UTC_DATE_FORMAT
+                ),
+                "ingested_at": datetime.now().isoformat(),
+            }
+        )
 
         progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
         if progress_key:
             if dev == "1":
                 print("Creating/Updating streamflow metadata json file in s3 bucket")
-            s3_client.put_object(
-                Bucket=streamflow_bucket,
-                Key=progress_key,
-                Body=body
-            )
+            s3_client.put_object(Bucket=streamflow_bucket, Key=progress_key, Body=body)
         else:
             raise ValueError("Missing streamflow bucket progress key value")
 
     consumer.close()
     if dev == "1":
         print("Kafka ingestion complete.")
+
 
 if __name__ == "__main__":
     while True:
