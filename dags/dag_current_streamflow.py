@@ -8,9 +8,7 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from airflow import DAG
-from airflow.models import DagModel
 from airflow.operators.python import PythonOperator
-from airflow.utils.session import provide_session
 from util import constants
 from scripts.airnow_raw_producers import (
     fetch_current_data,
@@ -64,7 +62,6 @@ def produce_current_data(**context):
             )
             raise
 
-@provide_session
 def archive_raw_current_data():
     """
     Archives processed raw current airnow data
@@ -88,8 +85,10 @@ default_args = {
 with DAG(
     dag_id="streamflow_current",
     default_args=default_args,
-    description="StreamFlow data pipeline: produce -> consume -> transform",
-    schedule=None,  # Manual trigger only
+    description="StreamFlow current airnow data pipeline: produce -> consume -> transform -> archive",
+    start_date=datetime(2026, 3, 18),
+    schedule="@hourly",
+    max_active_runs=1,
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
 ) as dag:
