@@ -176,7 +176,8 @@ services:
       - spark_data:/opt/spark-data
       - airflow_logs:/opt/airflow/logs
       - airflow_data:/opt/airflow
-    command: standalone
+    command: >
+      bash -c "airflow db init && airflow webserver & airflow scheduler"
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8080/health || exit 1" ]
       interval: 30s
