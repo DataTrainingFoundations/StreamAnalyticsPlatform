@@ -19,13 +19,13 @@ st.title("Air Quality Dashboard")
 
 @st.cache_data(ttl=300)
 def load_data():
-    base_path = "s3://stream-analytics-project-bucket/gold/"
+    base_path = "s3://stream-analytics-project-bucket/gold/airnow/"
 
     storage_options = {
-        "key": os.getenv("MINIO_ROOT_USER"),
-        "secret": os.getenv("MINIO_ROOT_PASSWORD"),
+        "key": os.getenv("AWS_USER"),
+        "secret": os.getenv("AWS_PASSWORD"),
         "client_kwargs": {
-            "endpoint_url": "http://localhost:9000"
+            "region_name": "us-east-1"
         }
     }
 
@@ -109,10 +109,9 @@ st.subheader(f"{chart_type}")
 # --------------------------------------------------
 if chart_type == "Line":
     # Merge only the columns needed
-    df_line = fact.merge(date, on="date_key")
-    df_line = df_line.merge(site, on="site_key")
-    # with st.expander("show df_line"):
-    #     st.dataframe(df_line)
+    df_line = fact.merge(date, on="date_key", how="left")
+    df_line = df_line.merge(site, on="site_key", how="left")
+    # st.write(df_line.columns)
     if selected_parameter != "All":
         allowed_keys = param[param["parameter"] == selected_parameter]["parameter_key"]
         df_line = df_line[df_line["parameter_key"].isin(allowed_keys)]
@@ -127,10 +126,10 @@ if chart_type == "Line":
             (df_line["longitude"] <= region["lon_max"])
         ]
 
-    df_line = df_line.groupby("date", as_index=False)["aqi"].mean().sort_values("date")
+    df_line = df_line.groupby("date_y", as_index=False)["aqi"].mean().sort_values("date_y")
     
     # st.write(df_line.head())
-    fig = px.line(df_line, x=x_axis, y=y_axis)
+    fig = px.line(df_line, x="date_y", y=y_axis)
     st.plotly_chart(fig, use_container_width=True)
 
 # --------------------------------------------------
@@ -157,13 +156,13 @@ elif chart_type == "Bar":
         ]
 
     # Group by hour and compute average AQI
-    agg = df_bar.groupby("hour", as_index=False)["aqi"].mean()
+    agg = df_bar.groupby("hour_y", as_index=False)["aqi"].mean()
 
     fig = px.bar(
         agg,
-        x="hour",
+        x="hour_y",
         y="aqi",
-        labels={"hour": "Hour (UTC)", "aqi": "Average AQI"}
+        labels={"hour_y": "Hour (UTC)", "aqi": "Average AQI"}
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -273,8 +272,8 @@ elif chart_type == "Pollution Map":
     # with st.expander("show df_map"):
     #     st.dataframe(df_map)
     
-    min_date = df_map["date"].min()
-    max_date = df_map["date"].max()
+    min_date = df_map["date_y"].min()
+    max_date = df_map["date_y"].max()
     selected_date = st.sidebar.date_input(
         "Date",
         value=min_date,
@@ -285,8 +284,8 @@ elif chart_type == "Pollution Map":
     selected_hour = st.sidebar.slider("Hour (UTC)", 0, 23, 0)
 
     df_map = df_map[
-        (df_map["date"] == selected_date) &
-        (df_map["hour"] == selected_hour)
+        (df_map["date_y"] == selected_date) &
+        (df_map["hour_y"] == selected_hour)
     ].groupby(
         ["sitename", "latitude", "longitude"],
         as_index=False
@@ -374,7 +373,7 @@ with st.expander("Show site data"):
     st.dataframe(site)
 with st.expander("Show param data"):
     st.dataframe(param)
-with st.expander("Show data date"):
+with st.expander("Show date data"):
     st.dataframe(date)
 with st.expander("Show category data"):
     st.dataframe(category)
