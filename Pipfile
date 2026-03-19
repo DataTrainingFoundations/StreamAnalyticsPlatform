@@ -16,6 +16,14 @@ moto = "*"
 
 [dev-packages]
 pytest = "*"
+jupyter = "*"
+notebook = "*"
+seaborn = "*"
+matplotlib = "*"
+duckdb = "*"
+plotly = "*"
+ipykernel = "*"
+
 
 [requires]
 python_version = "3.10"
