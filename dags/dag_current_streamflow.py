@@ -47,13 +47,9 @@ def produce_current_data(**context):
     Raises:
         Exception: If data fetching or publishing fails for any bounding box.
     """
-    ti = context["ti"]
         
-    i = 0
     for bbox in constants.BBOXES:
         try:
-            if i == 5 and DEV == "1":
-                break
             records = fetch_current_data(bbox)
             publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
             print(f"Published {len(records)} records to Kafka")
@@ -89,8 +85,9 @@ with DAG(
     dag_id="streamflow_current",
     default_args=default_args,
     description="StreamFlow data pipeline: produce -> consume -> transform",
-    schedule=None,  # Manual trigger only
+    schedule="@hourly",  # Manual trigger only
     catchup=False,  # Don't run for past dates
+    max_active_runs=1,  # Allow only one active DAG run at a time
     tags=["streamflow", "etl"],
 ) as dag:
 
