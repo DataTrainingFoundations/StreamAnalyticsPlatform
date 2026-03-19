@@ -21,6 +21,49 @@ from util import constants
 load_dotenv()
 
 dev = os.getenv("DEV")
+DEFAULT_FLUSH_RECORD_COUNT = 20000
+
+
+def ensure_bucket_exists(s3_client, bucket_name: str):
+    """Create the bucket if it does not already exist."""
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code not in {"404", "NoSuchBucket"}:
+            raise
+        s3_client.create_bucket(Bucket=bucket_name)
+        print(f"Created bucket: {bucket_name}")
+
+
+def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
+    """Write buffered records to storage and clear the in-memory partitions."""
+    total_records_written = 0
+
+    for date, hour_partitions in buffered_partitions.items():
+        date_partition = f"landing/airnow/date={date}"
+        for hour, partition_records in hour_partitions.items():
+            if not partition_records:
+                continue
+
+            key = f"{date_partition}/hour={hour}/{uuid.uuid4()}.json"
+            payload = "\n".join(
+                json.dumps(record, separators=(",", ":"))
+                for record in partition_records
+            ).encode("utf-8")
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=key,
+                Body=payload,
+            )
+            total_records_written += len(partition_records)
+
+        if dev == "1" and hour_partitions:
+            print(f"Wrote {sum(len(records) for records in hour_partitions.values())} records to {date_partition}")
+
+    buffered_partitions.clear()
+    return total_records_written
+
 
 def ensure_bucket_exists(s3_client, bucket_name: str):
     """Create the bucket if it does not already exist."""
