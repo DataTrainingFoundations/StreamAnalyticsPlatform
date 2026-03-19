@@ -217,14 +217,20 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
     )
     producer = KafkaProducer(
         bootstrap_servers=bootstrap_server,
+        key_serializer=lambda k: k.encode(),
         value_serializer=lambda v: json.dumps(v).encode(),
+
+        acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
+        enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
+        retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
+
+        linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "25")),
+        batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "65536")),
     )
     for record in records:
-        # record["ingested_at"] = datetime.now().isoformat()
-        message_key = f"{record['IntlAQSCode']}_{record['Parameter']}"
         producer.send(
             kafka_topic,
-            key=message_key.encode(),
+            key=f"{record['IntlAQSCode']}_{record['Parameter']}",
             value=record,
         )
 

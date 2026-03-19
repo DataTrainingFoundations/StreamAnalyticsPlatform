@@ -381,11 +381,11 @@ def silver_to_gold():
 if __name__ == "__main__":
     # Execute the ETL pipeline sequentially with optional delays between stages
     # Run raw to bronze transformation
-    # raw_to_bronze()
+    raw_to_bronze()
     # Optional: Wait 60 seconds before next transformation (commented out)
     # time.sleep(60)
     # Run bronze to silver transformation
-    # bronze_to_silver()
+    bronze_to_silver()
     # Optional: Wait 60 seconds before next transformation (commented out)
     # time.sleep(60)
     # Run silver to gold transformation

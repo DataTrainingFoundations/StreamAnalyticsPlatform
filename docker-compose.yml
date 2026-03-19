@@ -72,23 +72,6 @@ services:
       - streamflow-network
 
   # =============================================================================
-  # MINIO (For S3-Compatible Object Storage)
-  # =============================================================================
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    env_file:
-      - .env
-    ports:
-      - "9000:9000"      # API
-      - "9001:9001"      # Web UI
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - streamflow-network
-
-  # =============================================================================
   # SPARK (Master + Worker) - Using official Apache Spark image
   # =============================================================================
   # Init container to set up volume permissions
@@ -137,7 +120,7 @@ services:
         condition: service_started
     environment:
       - SPARK_MASTER=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=12G
+      - SPARK_WORKER_MEMORY=6G
       - SPARK_WORKER_CORES=3
       - SPARK_NO_DAEMONIZE=true
     command: [ "/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077" ]

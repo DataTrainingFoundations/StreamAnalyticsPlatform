@@ -8,9 +8,7 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from airflow import DAG
-from airflow.models import DagModel
 from airflow.operators.python import PythonOperator
-from airflow.utils.session import provide_session
 from util import constants
 from scripts.airnow_raw_producers import (
     fetch_current_data,
@@ -47,9 +45,13 @@ def produce_current_data(**context):
     Raises:
         Exception: If data fetching or publishing fails for any bounding box.
     """
+    ti = context["ti"]
         
+    i = 0
     for bbox in constants.BBOXES:
         try:
+            if i == 5 and DEV == "1":
+                break
             records = fetch_current_data(bbox)
             publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
             print(f"Published {len(records)} records to Kafka")
@@ -60,7 +62,6 @@ def produce_current_data(**context):
             )
             raise
 
-@provide_session
 def archive_raw_current_data():
     """
     Archives processed raw current airnow data
@@ -84,10 +85,11 @@ default_args = {
 with DAG(
     dag_id="streamflow_current",
     default_args=default_args,
-    description="StreamFlow data pipeline: produce -> consume -> transform",
-    schedule="@hourly",  # Manual trigger only
+    description="StreamFlow current airnow data pipeline: produce -> consume -> transform -> archive",
+    start_date=datetime(2026, 3, 18),
+    schedule="@hourly",
+    max_active_runs=1,
     catchup=False,  # Don't run for past dates
-    max_active_runs=1,  # Allow only one active DAG run at a time
     tags=["streamflow", "etl"],
 ) as dag:
 

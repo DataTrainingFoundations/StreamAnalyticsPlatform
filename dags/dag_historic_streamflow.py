@@ -127,9 +127,9 @@ default_args = {
 with DAG(
     dag_id="streamflow_historic",
     default_args=default_args,
-    description="StreamFlow data pipeline: produce -> consume -> transform",
+    description="StreamFlow historic airnow data pipeline: produce -> consume -> transform -> archive",
     start_date=datetime(2026, 3, 18),
-    schedule="@hourly", #0 */2 * * *",  # Every 2 hours
+    schedule="@hourly",
     max_active_runs=1,
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
