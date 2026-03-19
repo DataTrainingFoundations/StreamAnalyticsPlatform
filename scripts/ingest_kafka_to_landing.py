@@ -237,8 +237,7 @@ if __name__ == "__main__":
                 consume_data(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
                 break
             case "2":
-                topic = os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")
-                # current consumer function call goes here
+                consume_data(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")
