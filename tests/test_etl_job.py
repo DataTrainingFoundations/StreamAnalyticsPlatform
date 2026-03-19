@@ -233,10 +233,6 @@ class FakeFunctions:
         return FakeColumn("md5")
 
     @staticmethod
-    def create_map(items):
-        return FakeColumn("create_map")
-
-    @staticmethod
     def to_date(_col, _fmt=None):
         return FakeColumn("to_date")
 
