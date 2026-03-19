@@ -39,7 +39,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_NUM_PARTITIONS: 4
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
     volumes:
       - kafka_data:/var/lib/kafka/data
@@ -129,7 +129,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.spark
-    container_name: streamflow-spark-worker
     user: root
     depends_on:
       spark-init:
@@ -139,7 +138,7 @@ services:
     environment:
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=12G
-      - SPARK_WORKER_CORES=6
+      - SPARK_WORKER_CORES=3
       - SPARK_NO_DAEMONIZE=true
     command: [ "/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077" ]
     volumes:
