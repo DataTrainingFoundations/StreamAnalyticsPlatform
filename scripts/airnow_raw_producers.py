@@ -20,6 +20,7 @@ load_dotenv()
 docker_env = os.getenv("DOCKER_ENV")
 dev = os.getenv("DEV")
 
+
 def get_oldest_record_date():
     """
     Checks S3 bucket for the oldest date available in the data warehouse.
@@ -41,30 +42,29 @@ def get_oldest_record_date():
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
             region_name="us-east-1",
         )
-        if dev != "1"
-        else boto3.client(
-            "s3",
-            endpoint_url=(
-                os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT")
-            ),
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+        # if dev != "1"
+        # else boto3.client(
+        #     "s3",
+        #     endpoint_url=(
+        #         os.getenv("DOCKER_MINIO_ENDPOINT")
+        #         if docker_env == "1"
+        #         else os.getenv("LOCAL_MINIO_ENDPOINT")
+        #     ),
+        #     aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+        #     aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        # )
     )
 
     try:
         progress_key = os.getenv("STREAMFLOW_BUCKET_PROGRESS_KEY")
         if progress_key:
-            response = s3_client.get_object(
-                Bucket=streamflow_bucket,
-                Key=progress_key
-            )
+            response = s3_client.get_object(Bucket=streamflow_bucket, Key=progress_key)
             data = json.loads(response["Body"].read())
             if dev == "1":
                 print("Returning oldest date from db")
-            return datetime.strptime(data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT)
+            return datetime.strptime(
+                data["oldest_loaded_date"], constants.AIRNOW_UTC_DATE_FORMAT
+            )
         else:
             raise ValueError("Missing streamflow bucket progress key value")
     except s3_client.exceptions.NoSuchKey:
@@ -77,6 +77,7 @@ def get_oldest_record_date():
         return None  # No data found
     except ValueError as e:
         raise RuntimeError("Unable get oldest date from warehouse") from e
+
 
 def get_times(oldest_date_time: datetime | None = None):
     """
@@ -96,21 +97,21 @@ def get_times(oldest_date_time: datetime | None = None):
         oldest_date_time = get_oldest_record_date()
 
     if oldest_date_time is None:
-        # Default: previous month relative to today
+        # Default: previous 2 weeks relative to today
         today = datetime.now()
         start_dt = today.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
+            hour=0, minute=0, second=0, microsecond=0
         ) - relativedelta(weeks=2)
         end_dt = today.replace(
-            day=1, hour=23, minute=0, second=0, microsecond=0
+            hour=23, minute=0, second=0, microsecond=0
         ) - timedelta(days=1)
         if dev == "1":
             print("Using default dates")
     else:
         # Compute full month before oldest_date_time
-        oldest = oldest_date_time.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_dt = oldest.replace(day=1) - relativedelta(weeks=2)
-        end_dt = oldest.replace(day=1, hour=23) - timedelta(days=1)
+        oldest = oldest_date_time.replace(minute=0, second=0, microsecond=0)
+        start_dt = oldest - relativedelta(weeks=2)
+        end_dt = oldest - timedelta(hours=1)
         if dev == "1":
             print("Using calculated dates based on oldest time")
 
@@ -119,14 +120,14 @@ def get_times(oldest_date_time: datetime | None = None):
     return start_str, end_str
 
 
-def fetch_month_data(start, end, bbox):
+def fetch_historic_data(start, end, bbox):
     """
     Fetches historical air quality data from the AirNow API for a given time range and bounding box.
 
     Args:
         start (str): Start date/time in "YYYY-MM-DDTHH" format.
         end (str): End date/time in "YYYY-MM-DDTHH" format.
-        bbox (str): Bounding box coordinates as a comma-separated string 
+        bbox (str): Bounding box coordinates as a comma-separated string
         (e.g., "lat1,lng1,lat2,lng2").
 
     Returns:
@@ -160,7 +161,32 @@ def fetch_month_data(start, end, bbox):
     }
     if dev == "1":
         print("Returning fetched airnow data")
-    return requests.get(airnow_url, params=params, timeout=300).json()
+    try:
+        response = requests.get(airnow_url, params=params, timeout=300)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Case 1: API returned an error object (dict)
+        if isinstance(data, dict):
+            if "WebServiceError" in data:
+                print(f"\n\nFailed at {bbox} for time period {start} - {end}\n\n")
+                print(
+                    f"Received this response from AirNow: {data['WebServiceError'][0]['Message']}\n\n"
+                )
+                return []
+            else:
+                # Unexpected dict shape
+                raise RuntimeError(f"Unexpected response format: {data}")
+        # Case 2: API returned normal data (list)
+        if isinstance(data, list):
+            return data
+        # Case 3: Something weird
+        raise RuntimeError(f"Unexpected response type: {type(data)}")
+    except json.JSONDecodeError:
+        return []
+    except Exception as e:
+        raise RuntimeError("An unknown error occurred", e) from e
 
 
 def publish_raw_historical_records(records: list, kafka_topic: str):
@@ -257,8 +283,10 @@ def run_historic_producer():
     start, end = get_times()
     for bbox in constants.BBOXES:
         try:
-            records = fetch_month_data(start, end, bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+            records = fetch_historic_data(start, end, bbox)
+            publish_raw_historical_records(
+                records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
+            )
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)

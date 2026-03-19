@@ -65,6 +65,47 @@ def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
     return total_records_written
 
 
+def ensure_bucket_exists(s3_client, bucket_name: str):
+    """Create the bucket if it does not already exist."""
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code not in {"404", "NoSuchBucket"}:
+            raise
+        s3_client.create_bucket(Bucket=bucket_name)
+        print(f"Created bucket: {bucket_name}")
+
+
+def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
+    """Write buffered records to storage and clear the in-memory partitions."""
+    total_records_written = 0
+
+    for date, hour_partitions in buffered_partitions.items():
+        date_partition = f"landing/airnow/date={date}"
+        for hour, partition_records in hour_partitions.items():
+            if not partition_records:
+                continue
+
+            key = f"{date_partition}/hour={hour}/{uuid.uuid4()}.json"
+            payload = "\n".join(
+                json.dumps(record, separators=(",", ":"))
+                for record in partition_records
+            ).encode("utf-8")
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=key,
+                Body=payload,
+            )
+            total_records_written += len(partition_records)
+
+        if dev == "1" and hour_partitions:
+            print(f"Wrote {sum(len(records) for records in hour_partitions.values())} records to {date_partition}")
+
+    buffered_partitions.clear()
+    return total_records_written
+
+
 def consume_data(kafka_topic: str, is_historic: bool = True):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
@@ -105,7 +146,7 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
         kafka_topic,
         bootstrap_servers=bootstrap_server,
         auto_offset_reset="earliest",
-        group_id="minio_writer_group",
+        group_id="aws_s3_writer_group",
         enable_auto_commit=True,
         value_deserializer=lambda v: json.loads(v.decode()),
     )
@@ -120,20 +161,20 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
             aws_secret_access_key=os.getenv("AWS_PASSWORD"),
             region_name="us-east-1",
         )
-        if dev != "1"
-        else boto3.client(
-            "s3",
-            endpoint_url=(
-                os.getenv("DOCKER_MINIO_ENDPOINT")
-                if docker_env == "1"
-                else os.getenv("LOCAL_MINIO_ENDPOINT")
-            ),
-            aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-            aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        )
+        # if dev != "1"
+        # else boto3.client(
+        #     "s3",
+        #     endpoint_url=(
+        #         os.getenv("DOCKER_MINIO_ENDPOINT")
+        #         if docker_env == "1"
+        #         else os.getenv("LOCAL_MINIO_ENDPOINT")
+        #     ),
+        #     aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
+        #     aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
+        # )
     )
 
-    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
+    streamflow_bucket = os.getenv("STREAMFLOW_BUCKET","")
 
     # Create bucket, if nonexistent
     ensure_bucket_exists(s3_client, streamflow_bucket)
@@ -148,8 +189,10 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
     buffered_partitions = defaultdict(lambda: defaultdict(list))
     buffered_record_count = 0
     flush_record_count = int(
-        os.getenv("LANDING_FLUSH_RECORD_COUNT", DEFAULT_FLUSH_RECORD_COUNT)
+        os.getenv("LANDING_FLUSH_RECORD_COUNT","")
     )
+
+    max_wait_time = int(os.getenv("MAX_KAFKA_CONSUMER_IDLE_TIME",""))
 
     while True:
         if dev == "1":
@@ -159,7 +202,7 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
 
         if not records:
             # Exit if no messages arrive for a while
-            if time.time() - last_message_time > constants.MAX_KAFKA_CONSUMER_IDLE_TIME:
+            if time.time() - last_message_time > max_wait_time:
                 if buffered_record_count:
                     flush_partitions(s3_client, streamflow_bucket, buffered_partitions)
                 if dev == "1":
