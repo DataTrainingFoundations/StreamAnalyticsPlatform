@@ -129,7 +129,7 @@ with DAG(
     default_args=default_args,
     description="StreamFlow historic airnow data pipeline: produce -> consume -> transform -> archive",
     start_date=datetime(2026, 3, 18),
-    schedule="@hourly",
+    schedule="0 20-23,0-6 * * *",
     max_active_runs=1,
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
