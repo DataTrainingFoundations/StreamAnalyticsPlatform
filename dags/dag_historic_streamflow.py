@@ -21,12 +21,12 @@ from scripts.airnow_raw_producers import (
 from scripts.ingest_kafka_to_landing import (
     consume_data
 )
-from scripts.cleanup_data import move_processed_data
-from jobs.etl_job import (
-    raw_to_bronze,
-    bronze_to_silver,
-    silver_to_gold
-)
+# from scripts.cleanup_data import move_processed_data
+# from jobs.etl_job import (
+#     raw_to_bronze,
+#     bronze_to_silver,
+#     silver_to_gold
+# )
 
 load_dotenv()
 
@@ -104,32 +104,32 @@ def pause_this_dag(dag_id, session=None):
 
     this_dag.is_paused = True
 
-def archive_raw_historic_data():
-    """
-    Archives processed raw historic airnow data
-    """
-    archive_prefix = os.getenv("STREAMFLOW_BUCKET_ARCHIVE_PREFIX")
-    landing_prefix = os.getenv("STREAMFLOW_BUCKET_LANDING_PREFIX")
-    if not archive_prefix:
-        raise ValueError("Missing archive prefix value")
-    if not landing_prefix:
-        raise ValueError("Missing landing prefix value")
-    move_processed_data(landing_prefix, archive_prefix)
+# def archive_raw_historic_data():
+    # """
+    # Archives processed raw historic airnow data
+    # """
+    # archive_prefix = os.getenv("STREAMFLOW_BUCKET_ARCHIVE_PREFIX")
+    # landing_prefix = os.getenv("STREAMFLOW_BUCKET_LANDING_PREFIX")
+    # if not archive_prefix:
+    #     raise ValueError("Missing archive prefix value")
+    # if not landing_prefix:
+    #     raise ValueError("Missing landing prefix value")
+    # move_processed_data(landing_prefix, archive_prefix)
 
 # Default arguments for all tasks in the DAG
 default_args = {
-    "owner": "student",
+    "owner": "Streamflow Project Team",
     "retries": 1,
-    "retry_delay": timedelta(minutes=5),
+    "retry_delay": timedelta(minutes=2),
 }
 
 # Define the DAG with its configuration
 with DAG(
     dag_id="streamflow_historic",
     default_args=default_args,
-    description="StreamFlow historic airnow data pipeline: produce -> consume -> transform -> archive",
+    description="StreamFlow historic airnow data pipeline: produce -> consume",
     start_date=datetime(2026, 3, 18),
-    schedule="0 10-2,20-23,0-6 * * *",
+    schedule=None,#"0 10-2,20-23,0-6 * * *",
     max_active_runs=1,
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
@@ -163,40 +163,40 @@ with DAG(
     )
 
     # Task 4: Use Spark to read raw data and transform to bronze (json -> parquet)
-    transform_raw_to_bronze = PythonOperator(
-        task_id="transform_raw_to_bronze",
-        python_callable=raw_to_bronze,
-        doc="Transform landing zone data and write to bronze zone",
-    )
+    # transform_raw_to_bronze = PythonOperator(
+    #     task_id="transform_raw_to_bronze",
+    #     python_callable=raw_to_bronze,
+    #     doc="Transform landing zone data and write to bronze zone",
+    # )
 
     # Task 5: Use Spark to read bronze data and transform to silver (clean data)
-    transform_bronze_to_silver = PythonOperator(
-        task_id="transform_bronze_to_silver",
-        python_callable=bronze_to_silver,
-        doc="Transform bronze zone data and write to silver zone",
-    )
+    # transform_bronze_to_silver = PythonOperator(
+    #     task_id="transform_bronze_to_silver",
+    #     python_callable=bronze_to_silver,
+    #     doc="Transform bronze zone data and write to silver zone",
+    # )
 
     # Task 6: Use Spark to read silver data and transform to gold (star schema)
-    transform_silver_to_gold = PythonOperator(
-        task_id="transform_silver_to_gold",
-        python_callable=silver_to_gold,
-        doc="Transform silver zone data and write to gold zone",
-    )
+    # transform_silver_to_gold = PythonOperator(
+    #     task_id="transform_silver_to_gold",
+    #     python_callable=silver_to_gold,
+    #     doc="Transform silver zone data and write to gold zone",
+    # )
 
     # Task 7: Archive processed raw data
-    archive_raw_data = PythonOperator(
-        task_id="archive_raw_data",
-        python_callable=archive_raw_historic_data,
-        doc="Archive processed raw historic data"
-    )
+    # archive_raw_data = PythonOperator(
+    #     task_id="archive_raw_data",
+    #     python_callable=archive_raw_historic_data,
+    #     doc="Archive processed raw historic data"
+    # )
 
     # Set task dependencies: execute tasks sequentially
 
     check_date >> [produce_raw_data, stop]
 
     produce_raw_data >> \
-        ingest_to_landing >> \
-            transform_raw_to_bronze >> \
-                transform_bronze_to_silver >> \
-                    transform_silver_to_gold >> \
-                        archive_raw_data
+        ingest_to_landing #>> \
+            # transform_raw_to_bronze >> \
+            #     transform_bronze_to_silver >> \
+            #         transform_silver_to_gold >> \
+            #             archive_raw_data
