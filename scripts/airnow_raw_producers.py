@@ -184,6 +184,8 @@ def fetch_historic_data(start, end, bbox, retries=3):
                     f"Could not fetch data after {retries} attempts"
                 ) from e
             time.sleep(2**i)
+            if dev == "1":
+                print("Retrying fetch")
         except json.JSONDecodeError:
             return []
         except Exception as e:
