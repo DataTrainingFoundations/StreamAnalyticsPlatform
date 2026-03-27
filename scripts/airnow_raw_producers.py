@@ -7,6 +7,7 @@ and publish it to a Kafka topic for downstream processing.
 
 import os
 import json
+import time
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import requests
@@ -37,13 +38,11 @@ def get_oldest_record_date():
     dev = os.getenv("DEV")
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    s3_client = (
-        boto3.client(
-            "s3",
-            aws_access_key_id=os.getenv("AWS_USER"),
-            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-            region_name=os.getenv("AWS_REGION_NAME"),
-        )
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=os.getenv("AWS_USER"),
+        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+        region_name=os.getenv("AWS_REGION_NAME"),
     )
 
     try:
@@ -94,9 +93,9 @@ def get_times(oldest_date_time: datetime | None = None):
         start_dt = today.replace(
             hour=0, minute=0, second=0, microsecond=0
         ) - relativedelta(weeks=2)
-        end_dt = today.replace(
-            hour=23, minute=0, second=0, microsecond=0
-        ) - timedelta(days=1)
+        end_dt = today.replace(hour=23, minute=0, second=0, microsecond=0) - timedelta(
+            days=1
+        )
         if dev == "1":
             print("Using default dates")
     else:
@@ -112,7 +111,7 @@ def get_times(oldest_date_time: datetime | None = None):
     return start_str, end_str
 
 
-def fetch_historic_data(start, end, bbox):
+def fetch_historic_data(start, end, bbox, retries=3):
     """
     Fetches historical air quality data from the AirNow API for a given time range and bounding box.
 
@@ -154,32 +153,41 @@ def fetch_historic_data(start, end, bbox):
     }
     if dev == "1":
         print("Returning fetched airnow data")
-    try:
-        response = requests.get(airnow_url, params=params, timeout=300)
-        response.raise_for_status()
+    for i in range(retries):
+        try:
+            response = requests.get(airnow_url, params=params, timeout=600)
+            response.raise_for_status()
 
-        data = response.json()
+            data = response.json()
 
-        # Case 1: API returned an error object (dict)
-        if isinstance(data, dict):
-            if "WebServiceError" in data:
-                print(f"\n\nFailed at {bbox} for time period {start} - {end}\n\n")
-                print(
-                    f"Received this response from AirNow: {data['WebServiceError'][0]['Message']}\n\n"
-                )
-                return []
-            else:
-                # Unexpected dict shape
-                raise RuntimeError(f"Unexpected response format: {data}")
-        # Case 2: API returned normal data (list)
-        if isinstance(data, list):
-            return data
-        # Case 3: Something weird
-        raise RuntimeError(f"Unexpected response type: {type(data)}")
-    except json.JSONDecodeError:
-        return []
-    except Exception as e:
-        raise RuntimeError("An unknown error occurred", e) from e
+            # Case 1: API returned an error object (dict)
+            if isinstance(data, dict):
+                if "WebServiceError" in data:
+                    print(f"\n\nFailed at {bbox} for time period {start} - {end}\n\n")
+                    print(
+                        f"""Received this response from AirNow: {
+                            data['WebServiceError'][0]['Message']
+                        }\n\n"""
+                    )
+                    return []
+                else:
+                    # Unexpected dict shape
+                    raise RuntimeError(f"Unexpected response format: {data}")
+            # Case 2: API returned normal data (list)
+            if isinstance(data, list):
+                return data
+            # Case 3: Something weird
+            raise RuntimeError(f"Unexpected response type: {type(data)}")
+        except requests.exceptions.RequestException as e:
+            if i == retries - 1:
+                raise RuntimeError(
+                    f"Could not fetch data after {retries} attempts"
+                ) from e
+            time.sleep(2**i)
+        except json.JSONDecodeError:
+            return []
+        except Exception as e:
+            raise RuntimeError("An unknown error occurred", e) from e
 
 
 def publish_raw_historical_records(records: list, kafka_topic: str):
@@ -215,11 +223,9 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
         bootstrap_servers=bootstrap_server,
         key_serializer=lambda k: k.encode(),
         value_serializer=lambda v: json.dumps(v).encode(),
-
         acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
         enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
         retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
-
         linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "25")),
         batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "65536")),
     )
@@ -234,12 +240,13 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
     if dev == "1":
         print("Batch sent.")
 
+
 def fetch_current_data(bbox):
     """
     Fetches current air quality data from the AirNow API for the current hour and bounding box.
 
     Args:
-        bbox (str): Bounding box coordinates as a comma-separated string 
+        bbox (str): Bounding box coordinates as a comma-separated string
         (e.g., "lat1,lng1,lat2,lng2").
 
     Returns:
@@ -274,7 +281,6 @@ def fetch_current_data(bbox):
     return requests.get(airnow_url, params=params, timeout=300).json()
 
 
-
 def run_historic_producer():
     """
     Main function for running the producer locally.
@@ -295,6 +301,7 @@ def run_historic_producer():
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
 
+
 def run_current_producer():
     """
     Main function for running the current producer locally.
@@ -302,14 +309,17 @@ def run_current_producer():
     Fetches current hour data across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
-    
+
     for bbox in constants.BBOXES:
         try:
             records = fetch_current_data(bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+            publish_raw_historical_records(
+                records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")
+            )
         except Exception as e:
             print(f"Failed at {bbox} for time period {datetime.now()}")
             print("Failure due to the following error:\n", e)
+
 
 if __name__ == "__main__":
     while True:
