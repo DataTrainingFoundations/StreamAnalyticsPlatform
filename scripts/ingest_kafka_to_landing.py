@@ -21,7 +21,7 @@ from util import constants
 load_dotenv()
 
 dev = os.getenv("DEV")
-
+docker_env = os.getenv("DOCKER_ENV")
 
 def ensure_bucket_exists(s3_client, bucket_name: str):
     """Create the bucket if it does not already exist."""
@@ -39,34 +39,69 @@ def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
     """Write buffered records to storage and clear the in-memory partitions."""
     total_records_written = 0
 
-    for date, hour_partitions in buffered_partitions.items():
-        date_partition = f"landing/airnow/date={date}"
-        for hour, partition_records in hour_partitions.items():
-            if not partition_records:
-                continue
+    for date, records in buffered_partitions.items():
+        if not records:
+            continue
 
-            key = f"{date_partition}/hour={hour}/{uuid.uuid4()}.json"
-            payload = "\n".join(
-                json.dumps(record, separators=(",", ":"))
-                for record in partition_records
-            ).encode("utf-8")
-            s3_client.put_object(
-                Bucket=bucket_name,
-                Key=key,
-                Body=payload,
-            )
-            total_records_written += len(partition_records)
-
-        if dev == "1" and hour_partitions:
+        key = f"landing/airnow/date={date}/{uuid.uuid4()}.json"
+        payload = "\n".join(
+            json.dumps(record)
+            for record in records
+        ).encode("utf-8")
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=key,
+            Body=payload,
+        )
+        total_records_written += len(records)
+        if dev == "1" and records:
             print(
-                f"Wrote {sum(len(records) for records in hour_partitions.values())} records to {date_partition}"
+                f"Wrote {len(records)} records to {date} partition"
             )
+
+    if dev == "1" and total_records_written:
+        print(
+            f"Total records written: {total_records_written}"
+        )
 
     buffered_partitions.clear()
     return total_records_written
 
+def get_consumer(kafka_topic: str):
+    """
+    Setup Kafka Consumer object
+    """
+    # -----------------------------
+    # Setup Kafka consumer
+    # -----------------------------
+    if not kafka_topic:
+        raise ValueError("Missing kafka topic parameter")
+    bootstrap_server = (
+        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
+        if docker_env == "1"
+        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
+    )
+    return KafkaConsumer(
+        kafka_topic,
+        bootstrap_servers=bootstrap_server,
+        auto_offset_reset="earliest",
+        group_id="aws_s3_writer_group",
+        enable_auto_commit=False,
+        key_deserializer=lambda k: k.decode(),
+        value_deserializer=lambda v: json.loads(v.decode()),
+        max_poll_records=int(
+            os.getenv("KAFKA_CONSUMER_MAX_POLL_RECORDS", "25000")
+        ),  # batch size
+        fetch_max_wait_ms=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MAX_WAIT_MS", "500")
+        ),  # wait for batching
+        fetch_min_bytes=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MIN_BYTES", "1024")
+        ),  # don't fetch tiny payloads
+    )
 
-def consume_data(kafka_topic: str, is_historic: bool = True):
+
+def consume_data(consumer: KafkaConsumer, is_historic: bool = True):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
 
@@ -88,41 +123,8 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
     Raises:
         Exception: If Kafka consumer setup or MinIO operations fail.
     """
-    if not kafka_topic:
-        raise ValueError("Missing kafka topic parameter")
-
-    docker_env = os.getenv("DOCKER_ENV")
-
     # -----------------------------
-    # Setup Kafka consumer
-    # -----------------------------
-    bootstrap_server = (
-        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
-        if docker_env == "1"
-        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
-    )
-
-    consumer = KafkaConsumer(
-        kafka_topic,
-        bootstrap_servers=bootstrap_server,
-        auto_offset_reset="earliest",
-        group_id="aws_s3_writer_group",
-        enable_auto_commit=False,
-        key_deserializer=lambda k: k.decode(),
-        value_deserializer=lambda v: json.loads(v.decode()),
-        max_poll_records=int(
-            os.getenv("KAFKA_CONSUMER_MAX_POLL_RECORDS", "2500")
-        ),  # batch size
-        fetch_max_wait_ms=int(
-            os.getenv("KAFKA_CONSUMER_FETCH_MAX_WAIT_MS", "500")
-        ),  # wait for batching
-        fetch_min_bytes=int(
-            os.getenv("KAFKA_CONSUMER_FETCH_MIN_BYTES", "1024")
-        ),  # don't fetch tiny payloads
-    )
-
-    # -----------------------------
-    # Setup MinIO client
+    # Setup S3 client
     # -----------------------------
     s3_client = boto3.client(
         "s3",
@@ -143,7 +145,7 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
     if dev == "1":
         print("Starting Kafka consumption...")
     oldest_date_ingested = None
-    buffered_partitions = defaultdict(lambda: defaultdict(list))
+    buffered_partitions = defaultdict(list)
     buffered_record_count = 0
     flush_record_count = int(os.getenv("LANDING_FLUSH_RECORD_COUNT", "25000"))
     max_wait_time = int(os.getenv("MAX_KAFKA_CONSUMER_IDLE_TIME", "30"))
@@ -171,7 +173,7 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
         messages = [msg.value for msgs in records.values() for msg in msgs]
 
         # -----------------------------
-        # Buffer date/hour partitions and flush larger batches to storage.
+        # Buffer date partitions and flush larger batches to storage.
         # -----------------------------
         if dev == "1":
             print("Creating partitions for bucket insert")
@@ -184,9 +186,8 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
                 if oldest_date_ingested is None
                 else min(oldest_date_ingested, record_utc)
             )
-            date, hour = record["UTC"].split("T")
-            hour = hour[:2]  # Keep only hour and drop minutes
-            buffered_partitions[date][hour].append(record)
+            date, _ = record["UTC"].split("T")
+            buffered_partitions[date].append(record)
 
         buffered_record_count += len(messages)
 
@@ -234,10 +235,12 @@ if __name__ == "__main__":
         )
         match choice:
             case "1":
-                consume_data(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+                kafka_consumer = get_consumer(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+                consume_data(kafka_consumer)
                 break
             case "2":
-                consume_data(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+                kafka_consumer = get_consumer(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+                consume_data(kafka_consumer)
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")
