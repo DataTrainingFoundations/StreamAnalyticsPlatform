@@ -21,7 +21,7 @@ from util import constants
 load_dotenv()
 
 dev = os.getenv("DEV")
-
+docker_env = os.getenv("DOCKER_ENV")
 
 def ensure_bucket_exists(s3_client, bucket_name: str):
     """Create the bucket if it does not already exist."""
@@ -67,8 +67,41 @@ def flush_partitions(s3_client, bucket_name: str, buffered_partitions) -> int:
     buffered_partitions.clear()
     return total_records_written
 
+def get_consumer(kafka_topic: str):
+    """
+    Setup Kafka Consumer object
+    """
+    # -----------------------------
+    # Setup Kafka consumer
+    # -----------------------------
+    if not kafka_topic:
+        raise ValueError("Missing kafka topic parameter")
+    bootstrap_server = (
+        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
+        if docker_env == "1"
+        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
+    )
+    return KafkaConsumer(
+        kafka_topic,
+        bootstrap_servers=bootstrap_server,
+        auto_offset_reset="earliest",
+        group_id="aws_s3_writer_group",
+        enable_auto_commit=False,
+        key_deserializer=lambda k: k.decode(),
+        value_deserializer=lambda v: json.loads(v.decode()),
+        max_poll_records=int(
+            os.getenv("KAFKA_CONSUMER_MAX_POLL_RECORDS", "25000")
+        ),  # batch size
+        fetch_max_wait_ms=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MAX_WAIT_MS", "500")
+        ),  # wait for batching
+        fetch_min_bytes=int(
+            os.getenv("KAFKA_CONSUMER_FETCH_MIN_BYTES", "1024")
+        ),  # don't fetch tiny payloads
+    )
 
-def consume_data(kafka_topic: str, is_historic: bool = True):
+
+def consume_data(consumer: KafkaConsumer, is_historic: bool = True):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
 
@@ -90,39 +123,6 @@ def consume_data(kafka_topic: str, is_historic: bool = True):
     Raises:
         Exception: If Kafka consumer setup or MinIO operations fail.
     """
-    if not kafka_topic:
-        raise ValueError("Missing kafka topic parameter")
-
-    docker_env = os.getenv("DOCKER_ENV")
-
-    # -----------------------------
-    # Setup Kafka consumer
-    # -----------------------------
-    bootstrap_server = (
-        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
-        if docker_env == "1"
-        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
-    )
-
-    consumer = KafkaConsumer(
-        kafka_topic,
-        bootstrap_servers=bootstrap_server,
-        auto_offset_reset="earliest",
-        group_id="aws_s3_writer_group",
-        enable_auto_commit=False,
-        key_deserializer=lambda k: k.decode(),
-        value_deserializer=lambda v: json.loads(v.decode()),
-        max_poll_records=int(
-            os.getenv("KAFKA_CONSUMER_MAX_POLL_RECORDS", "2500")
-        ),  # batch size
-        fetch_max_wait_ms=int(
-            os.getenv("KAFKA_CONSUMER_FETCH_MAX_WAIT_MS", "500")
-        ),  # wait for batching
-        fetch_min_bytes=int(
-            os.getenv("KAFKA_CONSUMER_FETCH_MIN_BYTES", "1024")
-        ),  # don't fetch tiny payloads
-    )
-
     # -----------------------------
     # Setup S3 client
     # -----------------------------
@@ -235,10 +235,12 @@ if __name__ == "__main__":
         )
         match choice:
             case "1":
-                consume_data(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+                kafka_consumer = get_consumer(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+                consume_data(kafka_consumer)
                 break
             case "2":
-                consume_data(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+                kafka_consumer = get_consumer(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+                consume_data(kafka_consumer)
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")

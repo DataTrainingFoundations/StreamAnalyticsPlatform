@@ -12,7 +12,7 @@ from airflow.operators.python import PythonOperator
 from util import constants
 from scripts.airnow_raw_producers import (
     fetch_current_data,
-    publish_raw_historical_records
+    publish_raw_records
 )
 from scripts.ingest_kafka_to_landing import (
     consume_data
@@ -53,7 +53,7 @@ def produce_current_data(**context):
             if i == 5 and DEV == "1":
                 break
             records = fetch_current_data(bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+            publish_raw_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
             print(f"Published {len(records)} records to Kafka")
             i += 1
         except Exception as e:

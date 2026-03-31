@@ -15,10 +15,10 @@ from util import constants
 from scripts.airnow_raw_producers import (
     get_oldest_record_date,
     get_times,
-    fetch_historic_data,
-    publish_raw_historical_records
+    run_historic_producer
 )
 from scripts.ingest_kafka_to_landing import (
+    get_consumer,
     consume_data
 )
 # from scripts.cleanup_data import move_processed_data
@@ -63,8 +63,8 @@ def produce_historical_data(**context):
     """
     Execute the AirNow data producer to fetch and publish historical air quality data.
 
-    This function fetches historical air quality data for the previous month from multiple
-    bounding boxes (limited to first 5 for testing) and publishes the records to Kafka.
+    This function fetches historical air quality data for the previous two weeks from multiple
+    bounding boxes and publishes the records to Kafka.
     It's designed to be called as an Airflow task.
 
     The function will raise an exception if any bounding box fails to process,
@@ -82,16 +82,14 @@ def produce_historical_data(**context):
         key="oldest_date"
     )
     start, end = get_times(oldest_date)
-    for bbox in constants.BBOXES:
-        try:
-            records = fetch_historic_data(start, end, bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
-            print(f"✓ Published {len(records)} records to Kafka")
-        except Exception as e:
-            print(
-                f"✗ Producer failed at {bbox} for time period {start} - {end}: {str(e)}"
-            )
-            raise
+    run_historic_producer(start, end)
+
+def consumer_historical_data():
+    """
+    Create kafka consumer and consume data
+    """
+    kafka_consumer = get_consumer(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
+    consume_data(kafka_consumer)
 
 @provide_session
 def pause_this_dag(dag_id, session=None):
@@ -129,7 +127,7 @@ with DAG(
     default_args=default_args,
     description="StreamFlow historic airnow data pipeline: produce -> consume",
     start_date=datetime(2026, 3, 18),
-    schedule="0 20-23,0-6,10-14 * * *",
+    schedule=None,#"0 20-23,0-6,10-14 * * *",
     max_active_runs=1,
     catchup=False,  # Don't run for past dates
     tags=["streamflow", "etl"],
@@ -158,7 +156,7 @@ with DAG(
     # Task 3: Consume Kafka messages and write to landing zone (MinIO)
     ingest_to_landing = PythonOperator(
         task_id="ingest_raw_data_to_warehouse",
-        python_callable=lambda: consume_data(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")),
+        python_callable=consumer_historical_data,
         doc="Consume from Kafka topic and write batch to MinIO landing zone",
     )
 

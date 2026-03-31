@@ -111,6 +111,10 @@ def get_times(oldest_date_time: datetime | None = None):
     return start_str, end_str
 
 
+api_key = os.getenv("AIRNOW_API_KEY", "")
+airnow_url = os.getenv("AIRNOW_DATA_URL", "")
+
+
 def fetch_historic_data(start, end, bbox, retries=3):
     """
     Fetches historical air quality data from the AirNow API for a given time range and bounding box.
@@ -132,9 +136,6 @@ def fetch_historic_data(start, end, bbox, retries=3):
         - AIRNOW_API_KEY: API key for AirNow API access
         - AIRNOW_DATA_URL: Base URL for AirNow data API
     """
-    dev = os.getenv("DEV")
-    api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
@@ -192,57 +193,6 @@ def fetch_historic_data(start, end, bbox, retries=3):
             raise RuntimeError("An unknown error occurred", e) from e
 
 
-def publish_raw_historical_records(records: list, kafka_topic: str):
-    """
-    Publishes raw historical records to the corresponding Kafka topic.
-
-    Each record is enriched with an ingestion timestamp and published with a key
-    based on the AQS code and parameter for proper partitioning.
-
-    Args:
-        records (list): List of air quality measurement records to publish.
-
-    Environment Variables:
-        - DOCKER_ENV: Determines whether to use Docker or local Kafka settings
-        - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
-        - RAW_HISTORIC_DATA_KAFKA_TOPIC: Target Kafka topic name
-
-    Raises:
-        kafka.KafkaError: If publishing to Kafka fails.
-    """
-    docker_env = os.getenv("DOCKER_ENV")
-    dev = os.getenv("DEV")
-
-    if not kafka_topic:
-        raise ValueError("Missing kafka_topic parameter")
-
-    bootstrap_server = (
-        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
-        if docker_env == "1"
-        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
-    )
-    producer = KafkaProducer(
-        bootstrap_servers=bootstrap_server,
-        key_serializer=lambda k: k.encode(),
-        value_serializer=lambda v: json.dumps(v).encode(),
-        acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
-        enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
-        retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
-        linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "25")),
-        batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "65536")),
-    )
-    for record in records:
-        producer.send(
-            kafka_topic,
-            key=f"{record['IntlAQSCode']}_{record['Parameter']}",
-            value=record,
-        )
-
-    producer.flush()
-    if dev == "1":
-        print("Batch sent.")
-
-
 def fetch_current_data(bbox):
     """
     Fetches current air quality data from the AirNow API for the current hour and bounding box.
@@ -262,9 +212,6 @@ def fetch_current_data(bbox):
         - AIRNOW_API_KEY: API key for AirNow API access
         - AIRNOW_DATA_URL: Base URL for AirNow data API
     """
-    api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
-
     if api_key == "":
         raise ValueError("Missing API key")
     if airnow_url == "":
@@ -283,22 +230,84 @@ def fetch_current_data(bbox):
     return requests.get(airnow_url, params=params, timeout=300).json()
 
 
-def run_historic_producer():
+def get_producer():
+    """
+    Get Kafka producer
+    """
+    bootstrap_server = (
+        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
+        if docker_env == "1"
+        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
+    )
+
+    return KafkaProducer(
+        bootstrap_servers=bootstrap_server,
+        key_serializer=lambda k: k.encode(),
+        value_serializer=lambda v: json.dumps(v).encode(),
+        acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
+        enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
+        retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
+        linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "100")),
+        batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "262144")),
+        buffer_memory=int(os.getenv("KAFKA_PRODUCER_BUFFER_MEMORY", "67108864")),
+    )
+
+
+def publish_raw_records(records: list, kafka_topic: str, kafka_producer: KafkaProducer):
+    """
+    Publishes raw historical records to the corresponding Kafka topic.
+
+    Each record is enriched with an ingestion timestamp and published with a key
+    based on the AQS code and parameter for proper partitioning.
+
+    Args:
+        records (list): List of air quality measurement records to publish.
+
+    Environment Variables:
+        - DOCKER_ENV: Determines whether to use Docker or local Kafka settings
+        - DOCKER_KAFKA_BOOTSTRAP_SERVER / LOCAL_KAFKA_BOOTSTRAP_SERVER: Kafka bootstrap servers
+        - RAW_HISTORIC_DATA_KAFKA_TOPIC: Target Kafka topic name
+
+    Raises:
+        kafka.KafkaError: If publishing to Kafka fails.
+    """
+    if not kafka_topic:
+        raise ValueError("Missing kafka_topic parameter")
+
+    for i, record in enumerate(records):
+        kafka_producer.send(
+            kafka_topic,
+            key=f"{record['IntlAQSCode']}_{record['Parameter']}",
+            value=record,
+        )
+
+        # periodic flush to stabilize memory
+        if i % 10000 == 0:
+            kafka_producer.flush()
+
+    kafka_producer.flush()
+    if dev == "1":
+        print("Batch sent.")
+
+
+def run_historic_producer(start, end):
     """
     Main function for running the producer locally.
 
     Fetches historical data for the previous month across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
-    dev = os.getenv("DEV")
-
-    start, end = get_times()
+    records = []
+    producer = get_producer()
     for bbox in constants.BBOXES:
         try:
-            records = fetch_historic_data(start, end, bbox)
-            publish_raw_historical_records(
-                records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
-            )
+            records.extend(fetch_historic_data(start, end, bbox))
+            if len(records) >= constants.MIN_RECORDS_COUNT:
+                publish_raw_records(
+                    records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""), producer
+                )
+                print(f"✓ Published {len(records)} records to Kafka")
+                records.clear()
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
@@ -311,13 +320,11 @@ def run_current_producer():
     Fetches current hour data across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
-
+    producer = get_producer()
     for bbox in constants.BBOXES:
         try:
             records = fetch_current_data(bbox)
-            publish_raw_historical_records(
-                records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")
-            )
+            publish_raw_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""), producer)
         except Exception as e:
             print(f"Failed at {bbox} for time period {datetime.now()}")
             print("Failure due to the following error:\n", e)
@@ -334,7 +341,8 @@ if __name__ == "__main__":
         )
         match choice:
             case "1":
-                run_historic_producer()
+                start_date, end_date = get_times()
+                run_historic_producer(start_date, end_date)
                 break
             case "2":
                 run_current_producer()
