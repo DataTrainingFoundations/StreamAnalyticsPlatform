@@ -5,6 +5,7 @@ Orchestrates: Data Producer -> Kafka Ingest -> Spark ETL -> Validation
 """
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import os
 from dotenv import load_dotenv
 from airflow import DAG
@@ -126,7 +127,7 @@ with DAG(
     dag_id="streamflow_historic",
     default_args=default_args,
     description="StreamFlow historic airnow data pipeline: produce -> consume",
-    start_date=datetime(2026, 3, 18),
+    start_date=datetime(2026, 3, 18, tzinfo=ZoneInfo('America/New_York')),
     schedule="0 19-23,0-6,9-14 * * *",
     max_active_runs=1,
     catchup=False,  # Don't run for past dates
