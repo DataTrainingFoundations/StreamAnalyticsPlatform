@@ -1,0 +1,218 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: bronze
+    database: air_quality
+    tables:
+      - name: raw_aqi
+        description: "Raw AQI data ingested from AirNow via Snowpipe"
+  - name: gold
+    schema: gold
+    database: air_quality
+    tables: 
+      - name: dim_region
+        description: "Static dimension table representing dimensions"
+  
+models:
+  - name: cleaned_aqi
+    description: "Transforming AQI data from bronze level to silver level"
+    config:
+      tags: ['silver', 'staging']
+    columns:
+      - name: date
+        tests:
+          - not_null
+      - name: hour
+        tests:
+          - not_null
+      - name: intlaqscode
+        tests:
+          - not_null
+      - name: parameter
+        tests:
+          - not_null
+      - name: unit
+        tests:
+          - not_null
+      - name: aqi
+        tests:
+          - not_null
+      - name: category
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6]
+      - name: latitude
+        tests:
+          - not_null
+      - name: longitude
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date 
+              - hour
+              - intlaqscode
+              - parameter
+  
+  - name: dim_category
+    description: "Dimension table containing data about AQI category levels"
+    
+    config:
+      tags: ['gold', 'dimension']
+
+    columns: 
+      - name: category_key
+        description: "Surrogate key for category dimension"
+        tests:
+          - unique
+          - not_null
+      - name: category 
+        description: "Unique category of AQI threat levels"
+        tests: 
+          - unique
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6]
+      - name: concern_level
+        description: "Concern level description"
+        tests:
+          - not_null
+
+  - name: dim_date
+    description: "Dimension table containing data on dates"
+    
+    config:
+      tags: ['gold', 'dimension']
+
+    columns: 
+      - name: date_key
+        description: "Surrogate key for date dimension"
+        tests:
+          - unique
+          - not_null
+      - name: date 
+        description: "Unique date"
+        tests: 
+          - unique
+          - not_null
+
+  - name: dim_hour
+    description: "Dimension table containing data on hours"
+    
+    config:
+      tags: ['gold', 'dimension']
+
+    columns: 
+      - name: hour_key
+        description: "Surrogate key for hour dimension"
+        tests:
+          - unique
+          - not_null
+      - name: hour 
+        description: "Unique hours"
+        tests: 
+          - unique
+          - not_null
+  
+  - name: dim_parameter
+    description: "Dimension table containing data on different pollutants"
+    
+    config:
+      tags: ['gold', 'dimension']
+
+    columns:
+      - name: parameter_key
+        description: "Surrogate key for parameter dimension"
+        tests:
+          - unique
+          - not_null
+      - name: parameter
+        description: "Pollutant parameter"
+        tests:
+          - not_null
+      - name: unit
+        description: "Unit of measurement"
+        tests:
+          - not_null
+    
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - parameter 
+              - unit
+  
+  - name: dim_site
+    description: "Dimension table containing data on different locations"
+    
+    config:
+      tags: ['gold', 'dimension']
+
+    columns: 
+      - name: site_key
+        description: "Surrogate key for site dimension"
+        tests:
+          - unique
+          - not_null
+      - name: intlaqscode 
+        description: "Unique location code"
+        tests: 
+          - not_null
+      - name: sitename
+        description: "Site name"
+      - name: agencyname
+        description: "Agency name"
+      - name: latitude
+        description: "Latitude"
+      - name: longitude
+        description: "Longitude"
+      - name: region_key
+        description: "Region key"
+    
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - intlaqscode 
+              - latitude
+              - longitude
+  
+  - name: fact_air_quality_readings
+    description: "Fact table for gold level AQI data with dimensions"
+    
+    config:
+      tags: ['gold', 'fact']
+    
+    columns:
+      - name: date_key
+        tests:
+          - not_null
+      - name: hour_key
+        tests:
+          - not_null
+      - name: site_key
+        tests:
+          - not_null
+      - name: parameter_key
+        tests:
+          - not_null
+      - name: category_key
+        tests:
+          - not_null
+      - name: aqi
+        tests:
+          - not_null
+    
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date_key 
+              - hour_key
+              - site_key
+              - parameter_key
+              - category_key
