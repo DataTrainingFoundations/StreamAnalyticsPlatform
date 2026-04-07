@@ -21,6 +21,9 @@ seaborn = "*"
 matplotlib = "*"
 duckdb = "*"
 plotly = "*"
+dbt-snowflake = "*"
+
+[dev-packages]
 ipykernel = "*"
 pytest = "*"
 pytest-cov = "*"
