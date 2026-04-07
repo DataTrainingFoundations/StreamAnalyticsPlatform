@@ -116,7 +116,7 @@ def test_fetch_current_data_missing_env(monkeypatch):
     monkeypatch.delenv("AIRNOW_API_KEY", raising=False)
     monkeypatch.delenv("AIRNOW_DATA_URL", raising=False)
     with pytest.raises(ValueError):
-        arp.fetch_current_data("bbox")
+        arp.fetch_data("","","bbox")
 
 
 def test_fetch_current_data_success(monkeypatch):
@@ -129,13 +129,13 @@ def test_fetch_current_data_success(monkeypatch):
 
     monkeypatch.setattr(arp, "requests", type("m", (), {"get": lambda *args, **kwargs: DummyResponse()}))
 
-    result = arp.fetch_current_data("bbox")
+    result = arp.fetch_data("","","bbox")
     assert result == [{"x": 2}]
 
 
 def test_publish_raw_historical_records_missing_topic():
     with pytest.raises(ValueError):
-        arp.publish_raw_historical_records([], "")
+        arp.publish_raw_records([], "")
 
 
 def test_publish_raw_historical_records_sends(monkeypatch):

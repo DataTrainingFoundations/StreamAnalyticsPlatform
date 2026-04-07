@@ -22,6 +22,8 @@ matplotlib = "*"
 duckdb = "*"
 plotly = "*"
 ipykernel = "*"
+pytest = "*"
+pytest-cov = "*"
 
 [requires]
 python_version = "3.10"
