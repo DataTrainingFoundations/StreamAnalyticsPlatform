@@ -16,7 +16,7 @@ from util import constants
 from scripts.airnow_raw_producers import (
     get_oldest_record_date,
     get_times,
-    run_historic_producer
+    run_producer
 )
 from scripts.ingest_kafka_to_landing import (
     get_consumer,
@@ -83,7 +83,7 @@ def produce_historical_data(**context):
         key="oldest_date"
     )
     start, end = get_times(oldest_date)
-    run_historic_producer(start, end)
+    run_producer(start, end)
 
 def consumer_historical_data():
     """

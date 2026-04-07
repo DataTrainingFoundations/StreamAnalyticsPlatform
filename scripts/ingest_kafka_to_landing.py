@@ -144,6 +144,7 @@ def consume_data(consumer: KafkaConsumer, is_historic: bool = True):
     last_message_time = time.time()
     if dev == "1":
         print("Starting Kafka consumption...")
+        print("Subscribed to:", consumer.subscription())
     oldest_date_ingested = None
     buffered_partitions = defaultdict(list)
     buffered_record_count = 0
@@ -160,6 +161,7 @@ def consume_data(consumer: KafkaConsumer, is_historic: bool = True):
             if time.time() - last_message_time > max_wait_time:
                 if buffered_record_count:
                     flush_partitions(s3_client, streamflow_bucket, buffered_partitions)
+                    consumer.commit()
                 if dev == "1":
                     print("No new messages detected. Exiting consumer.")
                 break

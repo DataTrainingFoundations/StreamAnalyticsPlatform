@@ -115,9 +115,9 @@ api_key = os.getenv("AIRNOW_API_KEY", "")
 airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
 
-def fetch_historic_data(start, end, bbox, retries=3):
+def fetch_data(start, end, bbox, retries=3):
     """
-    Fetches historical air quality data from the AirNow API for a given time range and bounding box.
+    Fetches air quality data from the AirNow API for a given time range and bounding box.
 
     Args:
         start (str): Start date/time in "YYYY-MM-DDTHH" format.
@@ -193,43 +193,6 @@ def fetch_historic_data(start, end, bbox, retries=3):
             raise RuntimeError("An unknown error occurred", e) from e
 
 
-def fetch_current_data(bbox):
-    """
-    Fetches current air quality data from the AirNow API for the current hour and bounding box.
-
-    Args:
-        bbox (str): Bounding box coordinates as a comma-separated string
-        (e.g., "lat1,lng1,lat2,lng2").
-
-    Returns:
-        list: List of air quality measurement records from the API.
-
-    Raises:
-        ValueError: If required environment variables (API key or URL) are missing.
-        requests.RequestException: If the API request fails.
-
-    Environment Variables:
-        - AIRNOW_API_KEY: API key for AirNow API access
-        - AIRNOW_DATA_URL: Base URL for AirNow data API
-    """
-    if api_key == "":
-        raise ValueError("Missing API key")
-    if airnow_url == "":
-        raise ValueError("Missing airnow url")
-
-    params = {
-        "parameters": constants.POLLUTANTS,
-        "BBOX": bbox,
-        "dataType": "A",
-        "format": "application/json",
-        "verbose": 1,
-        "API_KEY": api_key,
-    }
-    if dev == "1":
-        print("Returning fetched airnow data")
-    return requests.get(airnow_url, params=params, timeout=300).json()
-
-
 def get_producer():
     """
     Get Kafka producer
@@ -290,7 +253,9 @@ def publish_raw_records(records: list, kafka_topic: str, kafka_producer: KafkaPr
         print("Batch sent.")
 
 
-def run_historic_producer(start, end):
+def run_producer(
+    start, end, kafka_topic=os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
+):
     """
     Main function for running the producer locally.
 
@@ -301,33 +266,20 @@ def run_historic_producer(start, end):
     producer = get_producer()
     for bbox in constants.BBOXES:
         try:
-            records.extend(fetch_historic_data(start, end, bbox))
+            records.extend(fetch_data(start, end, bbox))
             if len(records) >= constants.MIN_RECORDS_COUNT:
-                publish_raw_records(
-                    records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""), producer
-                )
+                publish_raw_records(records, kafka_topic, producer)
                 print(f"✓ Published {len(records)} records to Kafka")
                 records.clear()
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
-
-
-def run_current_producer():
-    """
-    Main function for running the current producer locally.
-
-    Fetches current hour data across all bounding boxes
-    and publishes to Kafka. This is primarily for testing and development.
-    """
-    producer = get_producer()
-    for bbox in constants.BBOXES:
-        try:
-            records = fetch_current_data(bbox)
-            publish_raw_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""), producer)
-        except Exception as e:
-            print(f"Failed at {bbox} for time period {datetime.now()}")
-            print("Failure due to the following error:\n", e)
+    if len(records) > 0:
+        publish_raw_records(
+            records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""), producer
+        )
+        print(f"✓ Published {len(records)} records to Kafka")
+        records.clear()
 
 
 if __name__ == "__main__":
@@ -342,10 +294,10 @@ if __name__ == "__main__":
         match choice:
             case "1":
                 start_date, end_date = get_times()
-                run_historic_producer(start_date, end_date)
+                run_producer(start_date, end_date)
                 break
             case "2":
-                run_current_producer()
+                run_producer("", "", os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")
