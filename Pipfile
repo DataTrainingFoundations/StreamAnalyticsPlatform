@@ -11,6 +11,10 @@ boto3 = "*"
 apache-airflow = "==2.8.1"
 flask = "*"
 streamlit = "*"
+pytest-mock = "*"
+
+[dev-packages]
+pytest = "*"
 jupyter = "*"
 notebook = "*"
 seaborn = "*"

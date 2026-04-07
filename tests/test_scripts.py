@@ -75,7 +75,7 @@ def test_fetch_historic_data_missing_env(monkeypatch):
     monkeypatch.delenv("AIRNOW_API_KEY", raising=False)
     monkeypatch.delenv("AIRNOW_DATA_URL", raising=False)
     with pytest.raises(ValueError):
-        arp.fetch_historic_data("2026-01-01T00", "2026-01-02T00", "bbox")
+        arp.fetch_data("2026-01-01T00", "2026-01-02T00", "bbox")
 
 
 def test_fetch_historic_data_api_error(monkeypatch):
@@ -91,7 +91,7 @@ def test_fetch_historic_data_api_error(monkeypatch):
 
     monkeypatch.setattr(arp, "requests", type("m", (), {"get": lambda *args, **kwargs: DummyResponse()}))
 
-    result = arp.fetch_historic_data("2026-01-01T00", "2026-01-02T00", "bbox")
+    result = arp.fetch_data("2026-01-01T00", "2026-01-02T00", "bbox")
     assert result == []
 
 
@@ -108,7 +108,7 @@ def test_fetch_historic_data_list(monkeypatch):
 
     monkeypatch.setattr(arp, "requests", type("m", (), {"get": lambda *args, **kwargs: DummyResponse()}))
 
-    result = arp.fetch_historic_data("2026-01-01T00", "2026-01-02T00", "bbox")
+    result = arp.fetch_data("2026-01-01T00", "2026-01-02T00", "bbox")
     assert result == [{"x": 1}]
 
 
@@ -116,7 +116,7 @@ def test_fetch_current_data_missing_env(monkeypatch):
     monkeypatch.delenv("AIRNOW_API_KEY", raising=False)
     monkeypatch.delenv("AIRNOW_DATA_URL", raising=False)
     with pytest.raises(ValueError):
-        arp.fetch_current_data("bbox")
+        arp.fetch_data("","","bbox")
 
 
 def test_fetch_current_data_success(monkeypatch):
@@ -129,13 +129,13 @@ def test_fetch_current_data_success(monkeypatch):
 
     monkeypatch.setattr(arp, "requests", type("m", (), {"get": lambda *args, **kwargs: DummyResponse()}))
 
-    result = arp.fetch_current_data("bbox")
+    result = arp.fetch_data("","","bbox")
     assert result == [{"x": 2}]
 
 
 def test_publish_raw_historical_records_missing_topic():
     with pytest.raises(ValueError):
-        arp.publish_raw_historical_records([], "")
+        arp.publish_raw_records([], "")
 
 
 def test_publish_raw_historical_records_sends(monkeypatch):
@@ -219,7 +219,7 @@ def test_fetch_historic_data_unexpected_dict_raises(monkeypatch):
     monkeypatch.setattr(arp, "requests", type("m", (), {"get": lambda *args, **kwargs: DummyResponse()}))
 
     with pytest.raises(RuntimeError):
-        arp.fetch_historic_data("2026-01-01T00", "2026-01-02T00", "bbox")
+        arp.fetch_data("2026-01-01T00", "2026-01-02T00", "bbox")
 
 
 def test_fetch_historic_data_json_decode_returns_empty(monkeypatch):
@@ -235,7 +235,7 @@ def test_fetch_historic_data_json_decode_returns_empty(monkeypatch):
 
     monkeypatch.setattr(arp, "requests", type("m", (), {"get": lambda *args, **kwargs: DummyResponse()}))
 
-    result = arp.fetch_historic_data("2026-01-01T00", "2026-01-02T00", "bbox")
+    result = arp.fetch_data("2026-01-01T00", "2026-01-02T00", "bbox")
     assert result == []
 
 
@@ -259,7 +259,7 @@ def test_run_historic_and_current_producers(monkeypatch):
     monkeypatch.setenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "historic-topic")
     monkeypatch.setenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "current-topic")
 
-    arp.run_historic_producer()
+    arp.run_producer()
     arp.run_current_producer()
 
     assert called_historic == ["historic-topic", "historic-topic"]
