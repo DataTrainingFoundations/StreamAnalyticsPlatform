@@ -101,7 +101,7 @@ def get_consumer(kafka_topic: str):
     )
 
 
-def consume_data(consumer: KafkaConsumer, is_historic: bool = True):
+def consume_data(consumer: KafkaConsumer, is_historic: bool = False):
     """
     Consume historical data from Kafka and write to MinIO with date/hour partitioning.
 

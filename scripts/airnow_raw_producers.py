@@ -254,7 +254,7 @@ def publish_raw_records(records: list, kafka_topic: str, kafka_producer: KafkaPr
 
 
 def run_producer(
-    start, end, kafka_topic=os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
+    start="", end="", is_historic=False
 ):
     """
     Main function for running the producer locally.
@@ -262,6 +262,11 @@ def run_producer(
     Fetches historical data for the previous month across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
+    if is_historic:
+        kafka_topic = os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
+    else:
+        kafka_topic = os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")
+
     records = []
     producer = get_producer()
     for bbox in constants.BBOXES:
@@ -276,7 +281,7 @@ def run_producer(
             print("Failure due to the following error:\n", e)
     if len(records) > 0:
         publish_raw_records(
-            records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""), producer
+            records, kafka_topic, producer
         )
         print(f"✓ Published {len(records)} records to Kafka")
         records.clear()
@@ -294,10 +299,10 @@ if __name__ == "__main__":
         match choice:
             case "1":
                 start_date, end_date = get_times()
-                run_producer(start_date, end_date)
+                run_producer(start_date, end_date, is_historic=True)
                 break
             case "2":
-                run_producer("", "", os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
+                run_producer()
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")

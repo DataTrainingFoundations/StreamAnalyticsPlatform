@@ -27,12 +27,12 @@ load_dotenv()
 
 DEV = os.getenv("DEV", "")
 
-def consumer_historical_data():
+def consume_current_data():
     """
     Create kafka consumer and consume data
     """
     kafka_consumer = get_consumer(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
-    consume_data(kafka_consumer, is_historic=False)
+    consume_data(kafka_consumer)
 
 # def archive_raw_current_data():
 #     """
@@ -68,14 +68,14 @@ with DAG(
      # Task 1: Produce raw data from AirNow API to Kafka if oldest date is acceptable
     produce_raw_data = PythonOperator(
         task_id="produce_raw_data_to_kafka",
-        python_callable=lambda: run_producer("", "", os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")),
+        python_callable=run_producer,
         doc="Fetch historical air quality data from AirNow API and publish to Kafka",
     )
 
     # Task 2: Consume Kafka messages and write to landing zone (MinIO)
     ingest_to_landing = PythonOperator(
         task_id="ingest_raw_data_to_warehouse",
-        python_callable=consumer_historical_data,
+        python_callable=consume_current_data,
         doc="Consume from Kafka topic and write batch to MinIO landing zone",
     )
 

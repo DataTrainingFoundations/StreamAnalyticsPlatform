@@ -83,14 +83,14 @@ def produce_historical_data(**context):
         key="oldest_date"
     )
     start, end = get_times(oldest_date)
-    run_producer(start, end)
+    run_producer(start, end, is_historic=True)
 
 def consumer_historical_data():
     """
     Create kafka consumer and consume data
     """
     kafka_consumer = get_consumer(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
-    consume_data(kafka_consumer)
+    consume_data(kafka_consumer, is_historic=True)
 
 @provide_session
 def pause_this_dag(dag_id, session=None):
