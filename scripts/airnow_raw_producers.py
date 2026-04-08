@@ -7,11 +7,13 @@ and publish it to a Kafka topic for downstream processing.
 
 import os
 import json
+import time
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import requests
 from kafka import KafkaProducer
 import boto3
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from util import constants
 
@@ -33,26 +35,14 @@ def get_oldest_record_date():
     Returns:
         datetime or None: Oldest date found, or None if bucket is empty.
     """
+    dev = os.getenv("DEV")
     streamflow_bucket = os.getenv("STREAMFLOW_BUCKET")
 
-    s3_client = (
-        boto3.client(
-            "s3",
-            aws_access_key_id=os.getenv("AWS_USER"),
-            aws_secret_access_key=os.getenv("AWS_PASSWORD"),
-            region_name="us-east-1",
-        )
-        # if dev != "1"
-        # else boto3.client(
-        #     "s3",
-        #     endpoint_url=(
-        #         os.getenv("DOCKER_MINIO_ENDPOINT")
-        #         if docker_env == "1"
-        #         else os.getenv("LOCAL_MINIO_ENDPOINT")
-        #     ),
-        #     aws_access_key_id=os.getenv("MINIO_ROOT_USER"),
-        #     aws_secret_access_key=os.getenv("MINIO_ROOT_PASSWORD"),
-        # )
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=os.getenv("AWS_USER"),
+        aws_secret_access_key=os.getenv("AWS_PASSWORD"),
+        region_name=os.getenv("AWS_REGION_NAME"),
     )
 
     try:
@@ -67,16 +57,15 @@ def get_oldest_record_date():
             )
         else:
             raise ValueError("Missing streamflow bucket progress key value")
-    except s3_client.exceptions.NoSuchKey:
-        if dev == "1":
-            print("Returning None")
-        return None  # No data found
-    except s3_client.exceptions.NoSuchBucket:
-        if dev == "1":
-            print("Returning None")
-        return None  # No data found
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code in ["NoSuchKey", "NoSuchBucket"]:
+            if dev == "1":
+                print("Returning None")
+            return None
+        raise  # re-raise unexpected errors
     except ValueError as e:
-        raise RuntimeError("Unable get oldest date from warehouse") from e
+        raise RuntimeError("Unable to get oldest date from warehouse") from e
 
 
 def get_times(oldest_date_time: datetime | None = None):
@@ -92,6 +81,8 @@ def get_times(oldest_date_time: datetime | None = None):
     Returns:
         tuple: (start_str, end_str) where both are strings in "YYYY-MM-DDTHH" format
     """
+    dev = os.getenv("DEV")
+
     if oldest_date_time is None:
         # Check MinIO for the oldest record
         oldest_date_time = get_oldest_record_date()
@@ -102,9 +93,9 @@ def get_times(oldest_date_time: datetime | None = None):
         start_dt = today.replace(
             hour=0, minute=0, second=0, microsecond=0
         ) - relativedelta(weeks=2)
-        end_dt = today.replace(
-            hour=23, minute=0, second=0, microsecond=0
-        ) - timedelta(days=1)
+        end_dt = today.replace(hour=23, minute=0, second=0, microsecond=0) - timedelta(
+            days=1
+        )
         if dev == "1":
             print("Using default dates")
     else:
@@ -120,9 +111,13 @@ def get_times(oldest_date_time: datetime | None = None):
     return start_str, end_str
 
 
-def fetch_historic_data(start, end, bbox):
+api_key = os.getenv("AIRNOW_API_KEY", "")
+airnow_url = os.getenv("AIRNOW_DATA_URL", "")
+
+
+def fetch_data(start, end, bbox, retries=3):
     """
-    Fetches historical air quality data from the AirNow API for a given time range and bounding box.
+    Fetches air quality data from the AirNow API for a given time range and bounding box.
 
     Args:
         start (str): Start date/time in "YYYY-MM-DDTHH" format.
@@ -141,8 +136,6 @@ def fetch_historic_data(start, end, bbox):
         - AIRNOW_API_KEY: API key for AirNow API access
         - AIRNOW_DATA_URL: Base URL for AirNow data API
     """
-    api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
 
     if api_key == "":
         raise ValueError("Missing API key")
@@ -161,35 +154,69 @@ def fetch_historic_data(start, end, bbox):
     }
     if dev == "1":
         print("Returning fetched airnow data")
-    try:
-        response = requests.get(airnow_url, params=params, timeout=300)
-        response.raise_for_status()
+    for i in range(retries):
+        try:
+            response = requests.get(airnow_url, params=params, timeout=600)
+            response.raise_for_status()
 
-        data = response.json()
+            data = response.json()
 
-        # Case 1: API returned an error object (dict)
-        if isinstance(data, dict):
-            if "WebServiceError" in data:
-                print(f"\n\nFailed at {bbox} for time period {start} - {end}\n\n")
-                print(
-                    f"Received this response from AirNow: {data['WebServiceError'][0]['Message']}\n\n"
-                )
-                return []
-            else:
-                # Unexpected dict shape
-                raise RuntimeError(f"Unexpected response format: {data}")
-        # Case 2: API returned normal data (list)
-        if isinstance(data, list):
-            return data
-        # Case 3: Something weird
-        raise RuntimeError(f"Unexpected response type: {type(data)}")
-    except json.JSONDecodeError:
-        return []
-    except Exception as e:
-        raise RuntimeError("An unknown error occurred", e) from e
+            # Case 1: API returned an error object (dict)
+            if isinstance(data, dict):
+                if "WebServiceError" in data:
+                    print(f"\n\nFailed at {bbox} for time period {start} - {end}\n\n")
+                    print(
+                        f"""Received this response from AirNow: {
+                            data['WebServiceError'][0]['Message']
+                        }\n\n"""
+                    )
+                    return []
+                else:
+                    # Unexpected dict shape
+                    raise RuntimeError(f"Unexpected response format: {data}")
+            # Case 2: API returned normal data (list)
+            if isinstance(data, list):
+                return data
+            # Case 3: Something weird
+            raise RuntimeError(f"Unexpected response type: {type(data)}")
+        except requests.exceptions.RequestException as e:
+            if i == retries - 1:
+                raise RuntimeError(
+                    f"Could not fetch data after {retries} attempts"
+                ) from e
+            time.sleep(2**i)
+            if dev == "1":
+                print("Retrying fetch")
+        except json.JSONDecodeError:
+            return []
+        except Exception as e:
+            raise RuntimeError("An unknown error occurred", e) from e
 
 
-def publish_raw_historical_records(records: list, kafka_topic: str):
+def get_producer():
+    """
+    Get Kafka producer
+    """
+    bootstrap_server = (
+        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
+        if docker_env == "1"
+        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
+    )
+
+    return KafkaProducer(
+        bootstrap_servers=bootstrap_server,
+        key_serializer=lambda k: k.encode(),
+        value_serializer=lambda v: json.dumps(v).encode(),
+        acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
+        enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
+        retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
+        linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "100")),
+        batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "262144")),
+        buffer_memory=int(os.getenv("KAFKA_PRODUCER_BUFFER_MEMORY", "67108864")),
+    )
+
+
+def publish_raw_records(records: list, kafka_topic: str, kafka_producer: KafkaProducer):
     """
     Publishes raw historical records to the corresponding Kafka topic.
 
@@ -210,108 +237,55 @@ def publish_raw_historical_records(records: list, kafka_topic: str):
     if not kafka_topic:
         raise ValueError("Missing kafka_topic parameter")
 
-    bootstrap_server = (
-        os.getenv("DOCKER_KAFKA_BOOTSTRAP_SERVER")
-        if docker_env == "1"
-        else os.getenv("LOCAL_KAFKA_BOOTSTRAP_SERVER")
-    )
-    producer = KafkaProducer(
-        bootstrap_servers=bootstrap_server,
-        key_serializer=lambda k: k.encode(),
-        value_serializer=lambda v: json.dumps(v).encode(),
-
-        acks=os.getenv("KAFKA_PRODUCER_ACKS", "all"),
-        enable_idempotence=os.getenv("KAFKA_PRODUCER_ENABLE_IDEMPOTENCE", "1") == "1",
-        retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "10")),
-
-        linger_ms=int(os.getenv("KAFKA_PRODUCER_LINGER_MS", "25")),
-        batch_size=int(os.getenv("KAFKA_PRODUCER_BATCH_SIZE", "65536")),
-    )
-    for record in records:
-        producer.send(
+    for i, record in enumerate(records):
+        kafka_producer.send(
             kafka_topic,
             key=f"{record['IntlAQSCode']}_{record['Parameter']}",
             value=record,
         )
 
-    producer.flush()
+        # periodic flush to stabilize memory
+        if i % 10000 == 0:
+            kafka_producer.flush()
+
+    kafka_producer.flush()
     if dev == "1":
         print("Batch sent.")
 
-def fetch_current_data(bbox):
-    """
-    Fetches current air quality data from the AirNow API for the current hour and bounding box.
 
-    Args:
-        bbox (str): Bounding box coordinates as a comma-separated string 
-        (e.g., "lat1,lng1,lat2,lng2").
-
-    Returns:
-        list: List of air quality measurement records from the API.
-
-    Raises:
-        ValueError: If required environment variables (API key or URL) are missing.
-        requests.RequestException: If the API request fails.
-
-    Environment Variables:
-        - AIRNOW_API_KEY: API key for AirNow API access
-        - AIRNOW_DATA_URL: Base URL for AirNow data API
-    """
-    api_key = os.getenv("AIRNOW_API_KEY", "")
-    airnow_url = os.getenv("AIRNOW_DATA_URL", "")
-
-    if api_key == "":
-        raise ValueError("Missing API key")
-    if airnow_url == "":
-        raise ValueError("Missing airnow url")
-
-    params = {
-        "parameters": constants.POLLUTANTS,
-        "BBOX": bbox,
-        "dataType": "A",
-        "format": "application/json",
-        "verbose": 1,
-        "API_KEY": api_key,
-    }
-    if dev == "1":
-        print("Returning fetched airnow data")
-    return requests.get(airnow_url, params=params, timeout=300).json()
-
-
-
-def run_historic_producer():
+def run_producer(
+    start="", end="", is_historic=False
+):
     """
     Main function for running the producer locally.
 
     Fetches historical data for the previous month across all bounding boxes
     and publishes to Kafka. This is primarily for testing and development.
     """
-    start, end = get_times()
+    if is_historic:
+        kafka_topic = os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
+    else:
+        kafka_topic = os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", "")
+
+    records = []
+    producer = get_producer()
     for bbox in constants.BBOXES:
         try:
-            records = fetch_historic_data(start, end, bbox)
-            publish_raw_historical_records(
-                records, os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", "")
-            )
+            records.extend(fetch_data(start, end, bbox))
+            if len(records) >= constants.MIN_RECORDS_COUNT:
+                publish_raw_records(records, kafka_topic, producer)
+                print(f"✓ Published {len(records)} records to Kafka")
+                records.clear()
         except Exception as e:
             print(f"Failed at {bbox} for time period {start} - {end}")
             print("Failure due to the following error:\n", e)
+    if len(records) > 0:
+        publish_raw_records(
+            records, kafka_topic, producer
+        )
+        print(f"✓ Published {len(records)} records to Kafka")
+        records.clear()
 
-def run_current_producer():
-    """
-    Main function for running the current producer locally.
-
-    Fetches current hour data across all bounding boxes
-    and publishes to Kafka. This is primarily for testing and development.
-    """
-    
-    for bbox in constants.BBOXES:
-        try:
-            records = fetch_current_data(bbox)
-            publish_raw_historical_records(records, os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
-        except Exception as e:
-            print(f"Failed at {bbox} for time period {datetime.now()}")
-            print("Failure due to the following error:\n", e)
 
 if __name__ == "__main__":
     while True:
@@ -324,10 +298,11 @@ if __name__ == "__main__":
         )
         match choice:
             case "1":
-                run_historic_producer()
+                start_date, end_date = get_times()
+                run_producer(start_date, end_date, is_historic=True)
                 break
             case "2":
-                run_current_producer()
+                run_producer()
                 break
             case _:
                 print("Invalid input. Please choose from the options below:")
