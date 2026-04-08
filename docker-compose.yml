@@ -114,7 +114,8 @@ services:
       - ./scripts:/opt/airflow/scripts
       - ./jobs:/opt/airflow/jobs
       - ./util:/opt/airflow/util
-      # - spark_data:/opt/spark-data
+      - ./stream_analytics_dbt:/opt/airflow/stream_analytics_dbt
+      - ~/.dbt:/root/.dbt
       - airflow_logs:/opt/airflow/logs
       - airflow_data:/opt/airflow
     command: >

@@ -7,6 +7,8 @@ Orchestrates: Data Producer -> Kafka Ingest -> Spark ETL -> Validation
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import os
+import subprocess
+import time
 from dotenv import load_dotenv
 from airflow import DAG
 from airflow.models import DagModel
@@ -31,7 +33,7 @@ from scripts.ingest_kafka_to_landing import (
 
 load_dotenv()
 
-DEV = os.getenv("DEV", "")
+DEV = os.getenv("DEV", "1")
 
 def decide_ingestion(**context):
     """
@@ -103,6 +105,27 @@ def pause_this_dag(dag_id, session=None):
 
     this_dag.is_paused = True
 
+def run_dbt():
+    """
+    Runs dbt models and tests for silver and gold transformation
+    """
+    if DEV == '1':
+        print('Waiting for Snowflake to stabilize')
+    time.sleep(120)
+
+    subprocess.run(
+        ["dbt", "deps"],
+        cwd="/opt/airflow/stream_analytics_dbt",
+        check=True
+    )
+
+    subprocess.run(
+        ["dbt", "build", "--target", "prod"],
+        cwd="/opt/airflow/stream_analytics_dbt",
+        check=True
+    )
+
+
 # def archive_raw_historic_data():
     # """
     # Archives processed raw historic airnow data
@@ -161,12 +184,12 @@ with DAG(
         doc="Consume from Kafka topic and write batch to MinIO landing zone",
     )
 
-    # Task 4: Use Spark to read raw data and transform to bronze (json -> parquet)
-    # transform_raw_to_bronze = PythonOperator(
-    #     task_id="transform_raw_to_bronze",
-    #     python_callable=raw_to_bronze,
-    #     doc="Transform landing zone data and write to bronze zone",
-    # )
+    # Task 4: Use dbt to read new raw data in bronze table and transform to bronze -> silver -> gold
+    transform_data = PythonOperator(
+        task_id="transform_data",
+        python_callable=run_dbt,
+        doc="Transform and write data from bronze to silver to gold zone",
+    )
 
     # Task 5: Use Spark to read bronze data and transform to silver (clean data)
     # transform_bronze_to_silver = PythonOperator(
@@ -194,8 +217,8 @@ with DAG(
     check_date >> [produce_raw_data, stop]
 
     produce_raw_data >> \
-        ingest_to_landing #>> \
-            # transform_raw_to_bronze >> \
+        ingest_to_landing >> \
+            transform_data #>> \
             #     transform_bronze_to_silver >> \
             #         transform_silver_to_gold >> \
             #             archive_raw_data

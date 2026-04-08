@@ -29,3 +29,6 @@ USER airflow
 
 # Install Python dependencies for Kafka integration
 RUN pip install --no-cache-dir kafka-python pyspark==3.5.0 snowflake-connector-python apache-airflow-providers-snowflake
+
+# Install Python dependencies for dbt
+RUN pip install dbt-snowflake

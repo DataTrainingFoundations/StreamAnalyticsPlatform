@@ -6,6 +6,8 @@ Orchestrates: Data Producer -> Kafka Ingest -> Spark ETL -> Validation
 
 from datetime import datetime, timedelta
 import os
+import time
+import subprocess
 from dotenv import load_dotenv
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -25,7 +27,7 @@ from scripts.ingest_kafka_to_landing import (
 
 load_dotenv()
 
-DEV = os.getenv("DEV", "")
+DEV = os.getenv("DEV", "1")
 
 def consume_current_data():
     """
@@ -33,6 +35,28 @@ def consume_current_data():
     """
     kafka_consumer = get_consumer(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
     consume_data(kafka_consumer)
+
+def run_dbt():
+    """
+    Runs dbt models and tests for silver and gold transformation
+    """
+    if DEV == '1':
+        print('Waiting for Snowflake to stabilize')
+    time.sleep(120)
+    if DEV == '1':
+        print('Installing dependencies for dbt')
+    subprocess.run(
+        ["dbt", "deps"],
+        cwd="/opt/airflow/stream_analytics_dbt",
+        check=True
+    )
+    if DEV == '1':
+        print('Running dbt')
+    subprocess.run(
+        ["dbt", "build", "--target", "prod"],
+        cwd="/opt/airflow/stream_analytics_dbt",
+        check=True
+    )
 
 # def archive_raw_current_data():
 #     """
@@ -57,7 +81,7 @@ default_args = {
 with DAG(
     dag_id="streamflow_current",
     default_args=default_args,
-    description="StreamFlow current airnow data pipeline: produce -> consume",
+    description="StreamFlow current airnow data pipeline: produce -> consume -> transform",
     start_date=datetime(2026, 3, 18),
     schedule="@hourly",
     max_active_runs=1,
@@ -77,6 +101,13 @@ with DAG(
         task_id="ingest_raw_data_to_warehouse",
         python_callable=consume_current_data,
         doc="Consume from Kafka topic and write batch to MinIO landing zone",
+    )
+
+    # Task 3: Use dbt to read new raw data in bronze table and transform to bronze -> silver -> gold
+    transform_data = PythonOperator(
+        task_id="transform_data",
+        python_callable=run_dbt,
+        doc="Transform and write data from bronze to silver to gold zone",
     )
 
     # # Task 4: Use Spark to read raw data and transform to bronze (json -> parquet)
@@ -110,8 +141,8 @@ with DAG(
     # Set task dependencies: execute tasks sequentially
 
     produce_raw_data >> \
-        ingest_to_landing #>> \
-            # transform_raw_to_bronze >> \
+        ingest_to_landing >> \
+            transform_data  #>> \
             #     transform_bronze_to_silver >> \
             #         transform_silver_to_gold >> \
             #             archive_raw_data
