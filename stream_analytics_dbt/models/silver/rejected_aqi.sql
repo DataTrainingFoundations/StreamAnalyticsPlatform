@@ -1,6 +1,7 @@
 {{ config(
     materialized='incremental',
-    incremental_strategy='append') }}
+    incremental_strategy='merge',
+    unique_key=['utc', 'fullaqscode', 'parameter']) }}
 
 WITH source_rejected AS (
     SELECT
@@ -96,11 +97,22 @@ duplicates AS (
     SELECT *
     FROM source_duplicates
     QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY utc, fullaqscode, intlaqscode, parameter
+        PARTITION BY utc, fullaqscode, parameter
         ORDER BY aqi DESC
     ) > 1
-)
+),
+all_rejected AS (
+    SELECT * FROM duplicates
+    UNION ALL
+    SELECT * FROM source_rejected
+),
+deduped AS (
+    SELECT *
+    FROM all_rejected
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY utc, fullaqscode, parameter
+        ORDER BY rejected_at DESC
+    ) = 1
+) 
 
-SELECT * FROM duplicates
-UNION ALL
-SELECT * FROM source_rejected
+SELECT * FROM deduped
