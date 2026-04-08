@@ -309,5 +309,6 @@ if __name__ == "__main__":
                 start_date = input("Enter start date (Format: '%Y-%m-%dT%H:%M'):\n")
                 end_date = input("Enter end date (Format: '%Y-%m-%dT%H:%M'):\n")
                 run_producer(start=start_date, end=end_date)
+                break
             case _:
                 print("Invalid input. Please choose from the options below:")

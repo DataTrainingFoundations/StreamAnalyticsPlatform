@@ -238,7 +238,7 @@ if __name__ == "__main__":
         match choice:
             case "1":
                 kafka_consumer = get_consumer(os.getenv("RAW_HISTORIC_DATA_KAFKA_TOPIC", ""))
-                consume_data(kafka_consumer)
+                consume_data(kafka_consumer, is_historic=True)
                 break
             case "2":
                 kafka_consumer = get_consumer(os.getenv("RAW_CURRENT_DATA_KAFKA_TOPIC", ""))
