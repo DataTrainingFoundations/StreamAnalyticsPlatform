@@ -1,5 +1,6 @@
 {{ config(
     materialized='incremental',
+    incremental_strategy='merge',
     unique_key=['date_key', 'hour_key', 'site_key', 'parameter_key', 'category_key']) }}
 
 SELECT
@@ -12,7 +13,7 @@ SELECT
     s.aqi 
 FROM {{ ref('cleaned_aqi') }} s 
     JOIN {{ ref('dim_site') }} ds 
-    ON s.intlaqscode = ds.intlaqscode
+    ON s.fullaqscode = ds.fullaqscode
     JOIN {{ ref('dim_parameter') }} dp
     ON s.parameter = dp.parameter 
     AND s.unit = dp.unit

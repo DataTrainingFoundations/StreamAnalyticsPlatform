@@ -1,15 +1,15 @@
 {{ config(
     materialized='incremental',
-    unique_key=['fullaqscode', 'latitude', 'longitude']) }}
+    incremental_strategy='merge',
+    unique_key='fullaqscode') }}
 WITH base AS (
     SELECT 
         c.fullaqscode,
-        c.intlaqscode, 
         c.sitename, 
         c.agencyname, 
         c.latitude, 
         c.longitude, 
-        {{ dbt_utils.generate_surrogate_key(['fullaqscode', 'latitude', 'longitude'])}} as site_key,
+        {{ dbt_utils.generate_surrogate_key(['fullaqscode'])}} as site_key,
         g.region_key
     FROM {{ ref('cleaned_aqi') }} c LEFT JOIN {{ source('gold', 'dim_region') }} g
         ON c.latitude  >= g.lat_min AND c.latitude  <= g.lat_max
@@ -18,9 +18,9 @@ WITH base AS (
     WHERE NOT EXISTS (
         SELECT 1
         FROM {{ this }} t
-        WHERE t.fullaqscode = {{ ref('cleaned_aqi') }}.fullaqscode
-            AND t.latitude = {{ ref('cleaned_aqi') }}.latitude
-            AND t.longitude = {{ ref('cleaned_aqi') }}.longitude
+        WHERE t.fullaqscode = c.fullaqscode
+            AND t.latitude = c.latitude
+            AND t.longitude = c.longitude
     )
 
     {% endif %}
@@ -29,7 +29,7 @@ deduped AS (
     SELECT *
     FROM base
     QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY fullaqscode, latitude, longitude
+        PARTITION BY fullaqscode
         ORDER BY region_key DESC
     ) = 1
 )
