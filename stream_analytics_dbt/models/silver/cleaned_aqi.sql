@@ -1,6 +1,7 @@
 {{ config(
     materialized='incremental',
-    unique_key=['date', 'hour', 'fullaqscode', 'intlaqscode', 'parameter']) }}
+    incremental_strategy='merge',
+    unique_key=['date', 'hour', 'fullaqscode', 'parameter']) }}
 
 
 WITH source AS (
@@ -14,10 +15,8 @@ WITH source AS (
         latitude,
         longitude,
         fullaqscode,
-        intlaqscode,
         DATE(utc::TIMESTAMP) AS date,
         HOUR(utc::TIMESTAMP) AS hour,
-        NULL AS local_hour,
         -- Concern level mapping (from AirNow)
         CASE category
             WHEN 1 THEN 'Good'
@@ -34,7 +33,6 @@ WITH source AS (
             AND aqi IS NOT NULL
             AND category IS NOT NULL
             AND fullaqscode IS NOT NULL
-            AND intlaqscode IS NOT NULL
             AND parameter IS NOT NULL
             AND latitude IS NOT NULL
             AND longitude IS NOT NULL
@@ -42,9 +40,10 @@ WITH source AS (
 
             {% if is_incremental() %}
             AND DATEADD(hour, HOUR(utc::timestamp), DATE(utc::timestamp)) > COALESCE(
-                (SELECT MAX(DATEADD(hour, hour, date))
+                (SELECT DATEADD(hour, -1, MAX(DATEADD(hour, hour, date)))
                 FROM {{ this }}),
                 '1900-01-01'::timestamp
+
             )
             {% endif %}
 ), deduped AS (
@@ -52,7 +51,7 @@ WITH source AS (
     SELECT *
     FROM source
     QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY date, hour, fullaqscode, intlaqscode, parameter
+        PARTITION BY date, hour, fullaqscode, parameter
         ORDER BY aqi DESC
     ) = 1
 )
